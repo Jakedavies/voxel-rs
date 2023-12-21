@@ -98,6 +98,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.76"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59d2a3357dde987206219e78ecfbbb6e8dad06cbb65292758d3270e6254f7355"
+
+[[package]]
 name = "arrayref"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1624,6 +1630,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 name = "voxel"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bytemuck",
  "env_logger",
  "image",
