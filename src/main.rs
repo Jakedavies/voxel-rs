@@ -1,8 +1,4 @@
-mod state;
-
-
-
 fn main() {
-    pollster::block_on(state::run());
+    pollster::block_on(voxel::run());
 }
 
