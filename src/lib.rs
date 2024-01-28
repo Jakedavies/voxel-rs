@@ -2,7 +2,7 @@ use std::f32::consts::PI;
 
 use camera_controller::CameraController;
 use cgmath::prelude::*;
-use model::ModelVertex;
+use model::{ModelVertex, DrawModel, DrawLight};
 use wgpu::util::DeviceExt;
 
 use winit::{
@@ -20,6 +20,7 @@ mod camera_controller;
 mod model;
 mod resources;
 mod texture;
+mod voxel;
 
 // NEW!
 struct Instance {
@@ -169,8 +170,6 @@ struct State {
     size: winit::dpi::PhysicalSize<u32>,
     render_pipeline: wgpu::RenderPipeline,
     bg_color: wgpu::Color,
-    diffuse_bind_group: wgpu::BindGroup,
-    diffuse_texture: texture::Texture, // NEW
     camera: Camera,
     camera_controller: CameraController,
     camera_uniform: CameraUniform,
@@ -257,51 +256,6 @@ impl State {
         };
         surface.configure(&device, &config);
 
-        let diffuse_bytes = include_bytes!("assets/tree.png");
-        let diffuse_texture =
-            texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "assets/tree.png")
-                .unwrap(); // CHANGED!
-
-        let texture_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        // This should match the filterable field of the
-                        // corresponding Texture entry above.
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-                label: Some("texture_bind_group_layout"),
-            });
-
-        let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                },
-            ],
-            label: Some("diffuse_bind_group"),
-        });
-
         let camera = Camera {
             // position the camera 1 unit up and 2 units back
             // +z is out of the screen
@@ -348,8 +302,6 @@ impl State {
             }],
             label: Some("camera_bind_group"),
         });
-
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
 
         let color_target = [Some(wgpu::ColorTargetState {
             format: config.format,
@@ -422,11 +374,7 @@ impl State {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[
-                    &texture_bind_group_layout,
-                    &camera_bind_group_layout,
-                    &light_bind_group_layout,
-                ],
+                bind_group_layouts: &[&camera_bind_group_layout, &light_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -480,10 +428,7 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
-        let obj_model =
-            resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
-                .await
-                .unwrap();
+        let obj_model = voxel::load_block(&device, &queue).await.unwrap();
 
         Self {
             window,
@@ -494,8 +439,7 @@ impl State {
             size,
             bg_color: wgpu::Color::BLACK,
             render_pipeline,
-            diffuse_texture,
-            diffuse_bind_group,
+            obj_model,
             // ...
             camera_uniform,
             camera_buffer,
@@ -510,7 +454,6 @@ impl State {
             instances,
             instance_buffer,
             depth_texture,
-            obj_model,
         }
     }
 
@@ -622,35 +565,21 @@ impl State {
                 timestamp_writes: None,
             });
 
+            render_pass.set_pipeline(&self.render_pipeline);
+            
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-            // render_pass.set_bind_group(2, &self.light_bind_group, &[]);
-            render_pass.set_pipeline(&self.render_pipeline);
-
-            use model::DrawLight; // NEW!
-            render_pass.set_pipeline(&self.light_render_pipeline); // NEW!
+            render_pass.set_pipeline(&self.light_render_pipeline);
             render_pass.draw_light_model(
                 &self.obj_model,
                 &self.camera_bind_group,
                 &self.light_bind_group,
-            ); // NEW!
-
-            use model::DrawModel;
-            render_pass.set_pipeline(&self.light_render_pipeline); // NEW!
-            render_pass.draw_light_model(
-                &self.obj_model,
-                &self.camera_bind_group,
-                &self.light_bind_group,
-            ); // NEW!
-
+            );
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.draw_model_instanced(
                 &self.obj_model,
                 0..self.instances.len() as u32,
                 &self.camera_bind_group,
-                &self.light_bind_group, // NEW
+                &self.light_bind_group,
             );
         }
 

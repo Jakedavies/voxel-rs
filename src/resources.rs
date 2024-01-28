@@ -37,9 +37,7 @@ pub async fn load_model(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
-) -> anyhow::Result<model::Model> {
-    let obj_text = load_string(file_name).await?;
-    let obj_cursor = Cursor::new(obj_text);
+) -> anyhow::Result<model::Model> { let obj_text = load_string(file_name).await?; let obj_cursor = Cursor::new(obj_text);
     let mut obj_reader = BufReader::new(obj_cursor);
 
     let (models, obj_materials) = tobj::load_obj_buf_async(
@@ -91,7 +89,6 @@ pub async fn load_model(
                         m.mesh.positions[i * 3 + 1],
                         m.mesh.positions[i * 3 + 2],
                     ],
-                    tex_coords: [m.mesh.texcoords[i * 2], m.mesh.texcoords[i * 2 + 1]],
                     normal: [
                         m.mesh.normals[i * 3],
                         m.mesh.normals[i * 3 + 1],
@@ -116,7 +113,6 @@ pub async fn load_model(
                 vertex_buffer,
                 index_buffer,
                 num_elements: m.mesh.indices.len() as u32,
-                material: m.mesh.material_id.unwrap_or(0),
             }
         })
         .collect::<Vec<_>>();
