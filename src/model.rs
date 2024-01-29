@@ -14,6 +14,12 @@ pub struct ModelVertex {
     pub normal: [f32; 3],
 }
 
+impl ModelVertex { 
+    pub fn new(position: [f32; 3], normal: [f32; 3]) -> Self {
+        Self { position, normal }
+    }
+}
+
 const ATTRIBS: [wgpu::VertexAttribute; 2] =
     wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
 
