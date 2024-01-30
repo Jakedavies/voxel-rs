@@ -115,6 +115,7 @@ impl InstanceRaw {
 
 const ROTATION_SPEED: f32 = PI / 180.0;
 
+#[derive(Debug)]
 struct Camera {
     eye: cgmath::Point3<f32>,
     target: cgmath::Point3<f32>,
@@ -147,14 +148,6 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
 
 pub const ROTATE_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0., 0.0, 0.0, 0.0, 0.0, 1.0,
-);
-
-const NUM_INSTANCES_PER_ROW: u32 = 2;
-
-const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
-    0.0,
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
 );
 
 // We need this for Rust to store our data correctly for the shaders
@@ -260,8 +253,7 @@ impl State {
             .formats
             .iter()
             .copied()
-            .filter(|f| f.is_srgb())
-            .next()
+            .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -277,7 +269,7 @@ impl State {
         let camera = Camera {
             // position the camera 1 unit up and 2 units back
             // +z is out of the screen
-            eye: (0.0, 2.0, 4.0).into(),
+            eye: (0.0, 20., 80.0).into(),
             // have it look at the origin
             target: (0.0, 0.0, 0.0).into(),
             // which way is "up"
@@ -320,12 +312,6 @@ impl State {
             }],
             label: Some("camera_bind_group"),
         });
-
-        let color_target = [Some(wgpu::ColorTargetState {
-            format: config.format,
-            blend: Some(wgpu::BlendState::REPLACE),
-            write_mask: wgpu::ColorWrites::ALL,
-        })];
 
         let depth_texture =
             texture::Texture::create_depth_texture(&device, &config, "depth_texture");
@@ -412,26 +398,7 @@ impl State {
         };
 
         const SPACE_BETWEEN: f32 = 2.0;
-        let instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let position = cgmath::Vector3 {
-                        x: x as f32,
-                        y: 0.0,
-                        z: z as f32,
-                    } - INSTANCE_DISPLACEMENT;
-
-                    let rotation = cgmath::Quaternion::from_axis_angle(
-                        cgmath::Vector3::unit_z(),
-                        cgmath::Deg(0.0),
-                    );
-
-                    Instance { position, rotation }
-                })
-            })
-            .collect::<Vec<_>>();
+        let instances = create_instances();
 
         let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -518,6 +485,7 @@ impl State {
             let current = instance.rotation;
             //instance.rotation = amount * current;
         }
+
         let instance_data = self
             .instances
             .iter()
@@ -601,6 +569,34 @@ impl State {
 
         Ok(())
     }
+}
+
+fn create_instances() -> Vec<Instance> {
+    const SPACE_BETWEEN: f32 = 2.0;
+    const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3 {
+        x: 1.0,
+        y: 1.0,
+        z: 1.0,
+    };
+    (0..32)
+        .flat_map(|z| {
+            (0..32).flat_map(move |y| {
+                (0..32).map(move |x| {
+                    let x = SPACE_BETWEEN * (x as f32 - 32 as f32 / 2.0);
+                    let y = SPACE_BETWEEN * (y as f32 - 32 as f32 / 2.0);
+                    let z = SPACE_BETWEEN * (z as f32 - 32 as f32 / 2.0);
+                    let position = cgmath::Vector3 { x, y, z } - INSTANCE_DISPLACEMENT;
+
+                    let rotation = cgmath::Quaternion::from_axis_angle(
+                        cgmath::Vector3::unit_z(),
+                        cgmath::Deg(0.0),
+                    );
+
+                    Instance { position, rotation }
+                })
+            })
+        })
+        .collect::<Vec<_>>()
 }
 
 fn create_render_pipeline(
