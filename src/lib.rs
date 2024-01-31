@@ -1,5 +1,6 @@
 use std::f32::consts::PI;
 
+use block::BlockType;
 use camera_controller::CameraController;
 use cgmath::prelude::*;
 use model::{DrawLight, DrawModel, ModelVertex};
@@ -14,28 +15,42 @@ use winit::{
     window::WindowBuilder,
 };
 
-use crate::model::Vertex;
+use crate::{model::Vertex, block::{Chunk16, Render}};
 
+mod block;
 mod camera_controller;
 mod model;
 mod resources;
 mod texture;
 mod voxel;
 
-// NEW!
-struct Instance {
+pub struct Instance {
     position: cgmath::Vector3<f32>,
     rotation: cgmath::Quaternion<f32>,
+    block_type: BlockType,
 }
-// NEW!
+
+impl Default for Instance {
+    fn default() -> Self {
+        Self {
+            position: cgmath::Vector3::zero(),
+            rotation: cgmath::Quaternion::from_axis_angle(
+                cgmath::Vector3::unit_z(),
+                cgmath::Deg(0.0),
+            ),
+            block_type: BlockType::Dirt,
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct InstanceRaw {
     model: [[f32; 4]; 4],
     normal: [[f32; 3]; 3],
+    block_data_0: i32,
 }
 
-// NEW!
 impl Instance {
     fn to_raw(&self) -> InstanceRaw {
         InstanceRaw {
@@ -43,6 +58,12 @@ impl Instance {
                 * cgmath::Matrix4::from(self.rotation))
             .into(),
             normal: cgmath::Matrix3::from(self.rotation).into(),
+            block_data_0: match self.block_type {
+                BlockType::Stone => 0,
+                BlockType::Dirt => 1,
+                BlockType::Grass => 2,
+                _ => 0,
+            }
         }
     }
 }
@@ -69,12 +90,8 @@ impl InstanceRaw {
             // instance when the shader starts processing a new instance
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &[
-                // A mat4 takes up 4 vertex slots as it is technically 4 vec4s. We need to define a slot
-                // for each vec4. We'll have to reassemble the mat4 in the shader.
                 wgpu::VertexAttribute {
                     offset: 0,
-                    // While our vertex shader only uses locations 0, and 1 now, in later tutorials, we'll
-                    // be using 2, 3, and 4, for Vertex. We'll start at slot 5, not conflict with them later
                     shader_location: 5,
                     format: wgpu::VertexFormat::Float32x4,
                 },
@@ -107,6 +124,11 @@ impl InstanceRaw {
                     offset: mem::size_of::<[f32; 22]>() as wgpu::BufferAddress,
                     shader_location: 11,
                     format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 25]>() as wgpu::BufferAddress,
+                    shader_location: 12,
+                    format: wgpu::VertexFormat::Uint32,
                 },
             ],
         }
@@ -194,10 +216,12 @@ struct State {
     instance_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
     obj_model: model::Model,
+    diffuse_bind_group: wgpu::BindGroup,
     // The window must be declared after the surface so
     // it gets dropped after it as the surface contains
     // unsafe references to the window's resources.
     window: Window,
+    chunk: Chunk16,
 }
 
 impl State {
@@ -265,6 +289,111 @@ impl State {
             view_formats: vec![],
         };
         surface.configure(&device, &config);
+        let diffuse_bytes = include_bytes!("../res/terrain.png");
+        let diffuse_image = image::load_from_memory(diffuse_bytes).unwrap();
+        let diffuse_rgba = diffuse_image.to_rgba8();
+
+        use image::GenericImageView;
+        let dimensions = diffuse_image.dimensions();
+
+        let texture_size = wgpu::Extent3d {
+            width: dimensions.0,
+            height: dimensions.1,
+            depth_or_array_layers: 1,
+        };
+        let diffuse_texture = device.create_texture(&wgpu::TextureDescriptor {
+            // All textures are stored as 3D, we represent our 2D texture
+            // by setting depth to 1.
+            size: texture_size,
+            mip_level_count: 1, // We'll talk about this a little later
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            // Most images are stored using sRGB, so we need to reflect that here.
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            // TEXTURE_BINDING tells wgpu that we want to use this texture in shaders
+            // COPY_DST means that we want to copy data to this texture
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            label: Some("diffuse_texture"),
+            // This is the same as with the SurfaceConfig. It
+            // specifies what texture formats can be used to
+            // create TextureViews for this texture. The base
+            // texture format (Rgba8UnormSrgb in this case) is
+            // always supported. Note that using a different
+            // texture format is not supported on the WebGL2
+            // backend.
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            // Tells wgpu where to copy the pixel data
+            wgpu::ImageCopyTexture {
+                texture: &diffuse_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            // The actual pixel data
+            &diffuse_rgba,
+            // The layout of the texture
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * dimensions.0),
+                rows_per_image: Some(dimensions.1),
+            },
+            texture_size,
+        );
+
+        let diffuse_texture_view =
+            diffuse_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let diffuse_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        // This should match the filterable field of the
+                        // corresponding Texture entry above.
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+                label: Some("texture_bind_group_layout"),
+            });
+
+        let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&diffuse_sampler),
+                },
+            ],
+            label: Some("diffuse_bind_group"),
+        });
 
         let camera = Camera {
             // position the camera 1 unit up and 2 units back
@@ -378,7 +507,7 @@ impl State {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&camera_bind_group_layout, &light_bind_group_layout],
+                bind_group_layouts: &[&camera_bind_group_layout, &light_bind_group_layout, &texture_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -398,7 +527,8 @@ impl State {
         };
 
         const SPACE_BETWEEN: f32 = 2.0;
-        let instances = create_instances();
+        let chunk = Chunk16::default();
+        let instances = chunk.render();
 
         let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -415,11 +545,11 @@ impl State {
             device,
             queue,
             config,
+            chunk,
             size,
             bg_color: wgpu::Color::BLACK,
             render_pipeline,
             obj_model,
-            // ...
             camera_uniform,
             camera_buffer,
             camera_bind_group,
@@ -429,10 +559,10 @@ impl State {
             light_render_pipeline,
             camera,
             camera_controller: camera_controller::CameraController::new(0.2),
-            // NEW!
             instances,
             instance_buffer,
             depth_texture,
+            diffuse_bind_group
         }
     }
 
@@ -480,14 +610,9 @@ impl State {
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
 
-        for instance in &mut self.instances {
-            let amount = cgmath::Quaternion::from_angle_y(cgmath::Rad(ROTATION_SPEED));
-            let current = instance.rotation;
-            //instance.rotation = amount * current;
-        }
-
         let instance_data = self
-            .instances
+            .chunk
+            .render()
             .iter()
             .map(Instance::to_raw)
             .collect::<Vec<_>>();
@@ -555,6 +680,7 @@ impl State {
                 &self.light_bind_group,
             );
             render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(2, &self.diffuse_bind_group, &[]);
             render_pass.draw_model_instanced(
                 &self.obj_model,
                 0..self.instances.len() as u32,
@@ -592,7 +718,11 @@ fn create_instances() -> Vec<Instance> {
                         cgmath::Deg(0.0),
                     );
 
-                    Instance { position, rotation }
+                    Instance {
+                        position,
+                        rotation,
+                        block_type: BlockType::Dirt,
+                    }
                 })
             })
         })
