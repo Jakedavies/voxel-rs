@@ -9,13 +9,13 @@ use wgpu::util::DeviceExt;
 use winit::{
     event::WindowEvent,
     event::*,
-    event_loop::{ControlFlow, EventLoop},
+    event_loop::{EventLoop},
     keyboard::{Key, KeyCode, PhysicalKey},
     window::Window,
     window::WindowBuilder,
 };
 
-use crate::{model::Vertex, block::{Chunk16, Render}};
+use crate::{model::Vertex, block::{Chunk16, Render}, resources::load_texture};
 
 mod block;
 mod camera_controller;
@@ -48,7 +48,7 @@ impl Default for Instance {
 struct InstanceRaw {
     model: [[f32; 4]; 4],
     normal: [[f32; 3]; 3],
-    block_data_0: i32,
+    block_data_0: u32,
 }
 
 impl Instance {
@@ -58,12 +58,7 @@ impl Instance {
                 * cgmath::Matrix4::from(self.rotation))
             .into(),
             normal: cgmath::Matrix3::from(self.rotation).into(),
-            block_data_0: match self.block_type {
-                BlockType::Stone => 0,
-                BlockType::Dirt => 1,
-                BlockType::Grass => 2,
-                _ => 0,
-            }
+            block_data_0: self.block_type.to_chunk_data(),
         }
     }
 }
@@ -289,71 +284,8 @@ impl State {
             view_formats: vec![],
         };
         surface.configure(&device, &config);
-        let diffuse_bytes = include_bytes!("../res/terrain.png");
-        let diffuse_image = image::load_from_memory(diffuse_bytes).unwrap();
-        let diffuse_rgba = diffuse_image.to_rgba8();
-
         use image::GenericImageView;
-        let dimensions = diffuse_image.dimensions();
-
-        let texture_size = wgpu::Extent3d {
-            width: dimensions.0,
-            height: dimensions.1,
-            depth_or_array_layers: 1,
-        };
-        let diffuse_texture = device.create_texture(&wgpu::TextureDescriptor {
-            // All textures are stored as 3D, we represent our 2D texture
-            // by setting depth to 1.
-            size: texture_size,
-            mip_level_count: 1, // We'll talk about this a little later
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            // Most images are stored using sRGB, so we need to reflect that here.
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            // TEXTURE_BINDING tells wgpu that we want to use this texture in shaders
-            // COPY_DST means that we want to copy data to this texture
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            label: Some("diffuse_texture"),
-            // This is the same as with the SurfaceConfig. It
-            // specifies what texture formats can be used to
-            // create TextureViews for this texture. The base
-            // texture format (Rgba8UnormSrgb in this case) is
-            // always supported. Note that using a different
-            // texture format is not supported on the WebGL2
-            // backend.
-            view_formats: &[],
-        });
-
-        queue.write_texture(
-            // Tells wgpu where to copy the pixel data
-            wgpu::ImageCopyTexture {
-                texture: &diffuse_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            // The actual pixel data
-            &diffuse_rgba,
-            // The layout of the texture
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * dimensions.0),
-                rows_per_image: Some(dimensions.1),
-            },
-            texture_size,
-        );
-
-        let diffuse_texture_view =
-            diffuse_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let diffuse_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
+        
 
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -380,16 +312,17 @@ impl State {
                 label: Some("texture_bind_group_layout"),
             });
 
+        let texture = load_texture("../res/terrain.png", &device, &queue).await.expect("Could not load texture");
         let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &texture_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
+                    resource: wgpu::BindingResource::TextureView(&texture.view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_sampler),
+                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
                 },
             ],
             label: Some("diffuse_bind_group"),
@@ -526,7 +459,6 @@ impl State {
             )
         };
 
-        const SPACE_BETWEEN: f32 = 2.0;
         let chunk = Chunk16::default();
         let instances = chunk.render();
 

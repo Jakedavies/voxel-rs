@@ -7,6 +7,7 @@ pub enum BlockType {
     Stone,
     Wood,
     Water,
+    Ore,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -20,6 +21,18 @@ impl Default for Block {
         Self {
             is_active: true,
             t: BlockType::Stone,
+        }
+    }
+}
+
+impl BlockType {
+    pub fn to_chunk_data(self) -> u32 {
+        match self {
+            BlockType::Stone => 0,
+            BlockType::Dirt => 1,
+            BlockType::Grass => 2,
+            BlockType::Ore => 16,
+            _ => 255,
         }
     }
 }
@@ -73,6 +86,22 @@ impl Default for Chunk16 {
                     },
                 );
             }
+        }
+
+        // randomly select some blocks in lower layers to turn to ore
+        for _ in 0..100 {
+            let x = rand::random::<u8>() % 16;
+            let y = rand::random::<u8>() % 13;
+            let z = rand::random::<u8>() % 16;
+            s.set_block(
+                x,
+                y,
+                z,
+                Block {
+                    is_active: true,
+                    t: BlockType::Ore,
+                },
+            );
         }
         s
     }

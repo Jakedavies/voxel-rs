@@ -38,6 +38,7 @@ struct VertexOutput {
     @location(2) world_position: vec3<f32>,
     @location(3) block_data_0: u32,
     @location(4) position: vec3<f32>,
+    @location(5) normal: vec3<f32>,
 }
 
 @vertex
@@ -66,6 +67,7 @@ fn vs_main(
     out.clip_position = camera.view_proj * world_position;
     out.block_data_0 = instance.block_data_0;
     out.position = model.position;
+    out.normal = model.normal;
 
     return out;
 }
@@ -77,13 +79,31 @@ var s_diffuse: sampler;
  
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    var uv: vec2<f32>;
+    let faceNormal: vec3<f32> = abs(in.normal);
+
+    if faceNormal.x > faceNormal.y && faceNormal.x > faceNormal.z {
+        // (1, 0, 0) is the abs normal of the face
+        uv = in.position.zy;
+    } else if faceNormal.y > faceNormal.x && faceNormal.y > faceNormal.z {
+        // (0, 1, 0) is the abs normal of the face
+        uv = in.position.xz;
+    } else {
+        // (0, 0, 1) is the abs normal of the face
+        uv = in.position.xy;
+    }
+
+    // dot normal and position to get a uv coordinate
+    //let uv = vec2<f32>(dot(in.normal.zxy, in.position), dot(in.normal.yzx, in.position));
     // convert position to a color for debugging
-    let corrected_position = 1.0 - (in.position + vec3<f32>(1.0, 1.0, 1.0)) / 2.0;
+    let corrected_position = 1.0 - (uv + vec2<f32>(1.0, 1.0)) / 2.0;
     //let object_color: vec4<f32> = vec4<f32>(corrected_position.x, corrected_position.y,  0.0, 1.0);
-    let texture_index = f32(in.block_data_0);
+    
+    let a = in.block_data_0 % 16u;
+    let texture_index = vec2<f32>(f32(a), f32(in.block_data_0 / 16u));
     let texture_offset = 1.0 / 16.0;
     let total_offset = texture_index * texture_offset;
-    let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, vec2<f32>(corrected_position.x / 16.0 + total_offset, corrected_position.y / 16.0));
+    let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, vec2<f32>(corrected_position.x / 16.0 + total_offset.x, corrected_position.y / 16.0 + total_offset.y));
     
     // We don't need (or want) much ambient light, so 0.1 is fine
     let ambient_strength = 0.1;

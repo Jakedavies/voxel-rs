@@ -37,7 +37,9 @@ pub async fn load_model(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
-) -> anyhow::Result<model::Model> { let obj_text = load_string(file_name).await?; let obj_cursor = Cursor::new(obj_text);
+) -> anyhow::Result<model::Model> {
+    let obj_text = load_string(file_name).await?;
+    let obj_cursor = Cursor::new(obj_text);
     let mut obj_reader = BufReader::new(obj_cursor);
 
     let (models, obj_materials) = tobj::load_obj_buf_async(
