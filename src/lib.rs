@@ -178,27 +178,58 @@ struct State {
     // unsafe references to the window's resources.
     window: Window,
     chunk: Chunk16,
+    file_watcher: FileWatcher,
+}
+
+#[derive(Clone)]
+struct FileWatcher {
     file_changes: Arc<Mutex<Vec<String>>>,
+}
+
+impl Default for FileWatcher {
+    fn default() -> Self {
+        Self {
+            file_changes: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+}
+
+impl FileWatcher {
+    fn write(&self, path: &str) {
+        self.file_changes.lock().unwrap().push(path.to_owned());
+    }
+}
+
+impl Iterator for FileWatcher {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut changes = self.file_changes.lock().unwrap();
+        if changes.is_empty() {
+            return None;
+        }
+        changes.pop()
+    }
 }
 
 impl State {
     // Creating some of the wgpu types requires async code
     async fn new(window: Window) -> Self {
 
-
         let size = window.inner_size();
 
-        let mut file_changes = Arc::new(Mutex::new(Vec::new()));
-
-        let f1 = file_changes.clone();
+        // setup file watching
+        let file_watcher = FileWatcher::default();
+        let f = file_watcher.clone();
         let mut watcher = notify::recommended_watcher(move |res| match res {
-            Ok(event) => f1.lock().unwrap().push("".to_owned()),
+            Ok(event) => f.write(""),
             Err(e) => println!("watch error: {:?}", e),
         }).expect("watcher failed");
 
         watcher
             .watch(Path::new("./res"), notify::RecursiveMode::Recursive)
             .expect("watch failed");
+
 
 
         // The instance is a handle to our GPU
@@ -392,7 +423,7 @@ impl State {
             instance_buffer,
             depth_texture,
             diffuse_bind_group,
-            file_changes
+            file_watcher
         }
     }
 
