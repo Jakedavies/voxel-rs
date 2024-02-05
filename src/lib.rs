@@ -1,7 +1,7 @@
 use std::f32::consts::PI;
 
 use block::BlockType;
-use camera_controller::CameraController;
+use camera::{Camera, CameraController};
 use cgmath::prelude::*;
 use model::{DrawLight, DrawModel, ModelVertex};
 use wgpu::util::DeviceExt;
@@ -9,20 +9,23 @@ use wgpu::util::DeviceExt;
 use winit::{
     event::WindowEvent,
     event::*,
-    event_loop::{EventLoop},
+    event_loop::EventLoop,
     keyboard::{Key, KeyCode, PhysicalKey},
     window::Window,
     window::WindowBuilder,
 };
 
-use crate::{model::Vertex, block::{Chunk16, Render}, resources::load_texture};
+use crate::{
+    block::{Chunk16, Render},
+    model::Vertex,
+};
 
 mod block;
-mod camera_controller;
 mod model;
 mod resources;
 mod texture;
 mod voxel;
+mod camera;
 
 pub struct Instance {
     position: cgmath::Vector3<f32>,
@@ -130,38 +133,7 @@ impl InstanceRaw {
     }
 }
 
-const ROTATION_SPEED: f32 = PI / 180.0;
 
-#[derive(Debug)]
-struct Camera {
-    eye: cgmath::Point3<f32>,
-    target: cgmath::Point3<f32>,
-    up: cgmath::Vector3<f32>,
-    aspect: f32,
-    fovy: f32,
-    znear: f32,
-    zfar: f32,
-}
-
-impl Camera {
-    fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
-        // 1.
-        let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
-        // 2.
-        let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
-
-        // 3.
-        return OPENGL_TO_WGPU_MATRIX * proj * view;
-    }
-}
-
-#[rustfmt::skip]
-pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
-    1.0, 0.0, 0.0, 0.0,
-    0.0, 1.0, 0.0, 0.0,
-    0.0, 0.0, 0.5, 0.5,
-    0.0, 0.0, 0.0, 1.0,
-);
 
 pub const ROTATE_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0., 0.0, 0.0, 0.0, 0.0, 1.0,
@@ -197,6 +169,7 @@ struct State {
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
     render_pipeline: wgpu::RenderPipeline,
+    render_pipeline_layout: wgpu::PipelineLayout,
     bg_color: wgpu::Color,
     camera: Camera,
     camera_controller: CameraController,
@@ -284,64 +257,8 @@ impl State {
             view_formats: vec![],
         };
         surface.configure(&device, &config);
-        use image::GenericImageView;
         
-
-        let texture_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        // This should match the filterable field of the
-                        // corresponding Texture entry above.
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-                label: Some("texture_bind_group_layout"),
-            });
-
-        let texture = load_texture("../res/terrain.png", &device, &queue).await.expect("Could not load texture");
-        let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
-                },
-            ],
-            label: Some("diffuse_bind_group"),
-        });
-
-        let camera = Camera {
-            // position the camera 1 unit up and 2 units back
-            // +z is out of the screen
-            eye: (0.0, 20., 80.0).into(),
-            // have it look at the origin
-            target: (0.0, 0.0, 0.0).into(),
-            // which way is "up"
-            up: cgmath::Vector3::unit_y(),
-            aspect: config.width as f32 / config.height as f32,
-            fovy: 45.0,
-            znear: 0.1,
-            zfar: 100.0,
-        };
-
+        let camera = Camera::default();
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera);
 
@@ -374,7 +291,7 @@ impl State {
             }],
             label: Some("camera_bind_group"),
         });
-
+camer
         let depth_texture =
             texture::Texture::create_depth_texture(&device, &config, "depth_texture");
 
@@ -437,10 +354,19 @@ impl State {
             )
         };
 
+        let (texture_bind_group_layout, diffuse_bind_group) = texture::setup(
+            &device,
+            &queue,
+        ).await;
+
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&camera_bind_group_layout, &light_bind_group_layout, &texture_bind_group_layout],
+                bind_group_layouts: &[
+                    &camera_bind_group_layout,
+                    &light_bind_group_layout,
+                    &texture_bind_group_layout,
+                ],
                 push_constant_ranges: &[],
             });
 
@@ -461,14 +387,12 @@ impl State {
 
         let chunk = Chunk16::default();
         let instances = chunk.render();
-
         let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
             contents: bytemuck::cast_slice(&instance_data),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
-
         let obj_model = voxel::load_block(&device, &queue).await.unwrap();
 
         Self {
@@ -481,6 +405,7 @@ impl State {
             size,
             bg_color: wgpu::Color::BLACK,
             render_pipeline,
+            render_pipeline_layout,
             obj_model,
             camera_uniform,
             camera_buffer,
@@ -490,11 +415,11 @@ impl State {
             light_bind_group,
             light_render_pipeline,
             camera,
-            camera_controller: camera_controller::CameraController::new(0.2),
+            camera_controller: CameraController::new(0.2),
             instances,
             instance_buffer,
             depth_texture,
-            diffuse_bind_group
+            diffuse_bind_group,
         }
     }
 
@@ -569,6 +494,23 @@ impl State {
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
+
+        // if shader has updated, recreate render Pipeline
+        self.render_pipeline = {
+            let shader = wgpu::ShaderModuleDescriptor {
+                label: Some("Normal Shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+            };
+            create_render_pipeline(
+                &self.device,
+                &self.render_pipeline_layout,
+                self.config.format,
+                Some(texture::Texture::DEPTH_FORMAT),
+                &[model::ModelVertex::desc(), InstanceRaw::desc()],
+                shader,
+            )
+        };
+
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -627,38 +569,6 @@ impl State {
 
         Ok(())
     }
-}
-
-fn create_instances() -> Vec<Instance> {
-    const SPACE_BETWEEN: f32 = 2.0;
-    const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3 {
-        x: 1.0,
-        y: 1.0,
-        z: 1.0,
-    };
-    (0..32)
-        .flat_map(|z| {
-            (0..32).flat_map(move |y| {
-                (0..32).map(move |x| {
-                    let x = SPACE_BETWEEN * (x as f32 - 32 as f32 / 2.0);
-                    let y = SPACE_BETWEEN * (y as f32 - 32 as f32 / 2.0);
-                    let z = SPACE_BETWEEN * (z as f32 - 32 as f32 / 2.0);
-                    let position = cgmath::Vector3 { x, y, z } - INSTANCE_DISPLACEMENT;
-
-                    let rotation = cgmath::Quaternion::from_axis_angle(
-                        cgmath::Vector3::unit_z(),
-                        cgmath::Deg(0.0),
-                    );
-
-                    Instance {
-                        position,
-                        rotation,
-                        block_type: BlockType::Dirt,
-                    }
-                })
-            })
-        })
-        .collect::<Vec<_>>()
 }
 
 fn create_render_pipeline(

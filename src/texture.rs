@@ -1,5 +1,8 @@
 use anyhow::*;
 use image::GenericImageView;
+use wgpu::{Device, BindGroupLayout, BindGroup};
+
+use crate::resources::load_texture;
 
 pub struct Texture {
     pub texture: wgpu::Texture,
@@ -124,4 +127,52 @@ impl Texture {
             sampler,
         }
     }
+}
+
+pub async fn setup(device: &Device, queue: &wgpu::Queue) -> (BindGroupLayout, BindGroup) {
+    let texture_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    // This should match the filterable field of the
+                    // corresponding Texture entry above.
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+            label: Some("texture_bind_group_layout"),
+        });
+
+    let texture = load_texture("../res/terrain.png", &device, &queue)
+        .await
+        .expect("Could not load texture");
+
+    let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        layout: &texture_bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&texture.view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&texture.sampler),
+            },
+        ],
+        label: Some("diffuse_bind_group"),
+    });
+
+    (texture_bind_group_layout, diffuse_bind_group)
 }
