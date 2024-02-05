@@ -1,10 +1,12 @@
-use std::f32::consts::PI;
+use std::{f32::consts::PI, path::Path, sync::{Arc, Mutex}};
 
 use block::BlockType;
 use camera::{Camera, CameraController};
 use cgmath::prelude::*;
+use light::LightUniform;
 use model::{DrawLight, DrawModel, ModelVertex};
 use wgpu::util::DeviceExt;
+use notify::{Watcher, RecommendedWatcher, RecursiveMode};
 
 use winit::{
     event::WindowEvent,
@@ -18,14 +20,16 @@ use winit::{
 use crate::{
     block::{Chunk16, Render},
     model::Vertex,
+    resources::load_texture,
 };
 
 mod block;
+mod camera;
+mod light;
 mod model;
 mod resources;
 mod texture;
 mod voxel;
-mod camera;
 
 pub struct Instance {
     position: cgmath::Vector3<f32>,
@@ -64,18 +68,6 @@ impl Instance {
             block_data_0: self.block_type.to_chunk_data(),
         }
     }
-}
-
-// lib.rs
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct LightUniform {
-    position: [f32; 3],
-    // Due to uniforms requiring 16 byte (4 float) spacing, we need to use a padding field here
-    _padding: u32,
-    color: [f32; 3],
-    // Due to uniforms requiring 16 byte (4 float) spacing, we need to use a padding field here
-    _padding2: u32,
 }
 
 impl InstanceRaw {
@@ -132,9 +124,6 @@ impl InstanceRaw {
         }
     }
 }
-
-
-
 pub const ROTATE_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0., 0.0, 0.0, 0.0, 0.0, 1.0,
 );
@@ -151,7 +140,6 @@ struct CameraUniform {
 
 impl CameraUniform {
     fn new() -> Self {
-        use cgmath::SquareMatrix;
         Self {
             view_proj: cgmath::Matrix4::identity().into(),
         }
@@ -190,12 +178,28 @@ struct State {
     // unsafe references to the window's resources.
     window: Window,
     chunk: Chunk16,
+    file_changes: Arc<Mutex<Vec<String>>>,
 }
 
 impl State {
     // Creating some of the wgpu types requires async code
     async fn new(window: Window) -> Self {
+
+
         let size = window.inner_size();
+
+        let mut file_changes = Arc::new(Mutex::new(Vec::new()));
+
+        let f1 = file_changes.clone();
+        let mut watcher = notify::recommended_watcher(move |res| match res {
+            Ok(event) => f1.lock().unwrap().push("".to_owned()),
+            Err(e) => println!("watch error: {:?}", e),
+        }).expect("watcher failed");
+
+        watcher
+            .watch(Path::new("./res"), notify::RecursiveMode::Recursive)
+            .expect("watch failed");
+
 
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
@@ -257,8 +261,15 @@ impl State {
             view_formats: vec![],
         };
         surface.configure(&device, &config);
-        
-        let camera = Camera::default();
+
+        let (texture_bind_group_layout, diffuse_bind_group) = texture::setup(&device, &queue).await;
+
+        let camera = Camera {
+            eye: (0.0, 20., 80.0).into(),
+            aspect: config.width as f32 / config.height as f32,
+            ..Camera::default()
+        };
+
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera);
 
@@ -291,48 +302,12 @@ impl State {
             }],
             label: Some("camera_bind_group"),
         });
-camer
+
         let depth_texture =
             texture::Texture::create_depth_texture(&device, &config, "depth_texture");
 
-        let light_uniform = LightUniform {
-            position: [2.0, 10.0, 2.0],
-            _padding: 0,
-            color: [1.0, 1.0, 1.0],
-            _padding2: 0,
-        };
-
-        // We'll want to update our lights position, so we use COPY_DST
-        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Light VB"),
-            contents: bytemuck::cast_slice(&[light_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let light_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: None,
-            });
-
-        let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &light_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: light_buffer.as_entire_binding(),
-            }],
-            label: None,
-        });
-
+        let (light_bind_group_layout, light_bind_group, light_buffer, light_uniform) =
+            light::setup(&device).await;
         // lib.rs
         let light_render_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -354,11 +329,6 @@ camer
             )
         };
 
-        let (texture_bind_group_layout, diffuse_bind_group) = texture::setup(
-            &device,
-            &queue,
-        ).await;
-
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
@@ -373,7 +343,7 @@ camer
         let render_pipeline = {
             let shader = wgpu::ShaderModuleDescriptor {
                 label: Some("Normal Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(include_str!("../res/shader.wgsl").into()),
             };
             create_render_pipeline(
                 &device,
@@ -387,12 +357,14 @@ camer
 
         let chunk = Chunk16::default();
         let instances = chunk.render();
+
         let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
             contents: bytemuck::cast_slice(&instance_data),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
+
         let obj_model = voxel::load_block(&device, &queue).await.unwrap();
 
         Self {
@@ -415,11 +387,12 @@ camer
             light_bind_group,
             light_render_pipeline,
             camera,
-            camera_controller: CameraController::new(0.2),
+            camera_controller: CameraController::new(1.0),
             instances,
             instance_buffer,
             depth_texture,
             diffuse_bind_group,
+            file_changes
         }
     }
 
@@ -499,7 +472,7 @@ camer
         self.render_pipeline = {
             let shader = wgpu::ShaderModuleDescriptor {
                 label: Some("Normal Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(include_str!("../res/shader.wgsl").into()),
             };
             create_render_pipeline(
                 &self.device,

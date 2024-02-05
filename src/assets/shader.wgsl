@@ -102,8 +102,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let texture_index = vec2<f32>(f32(a), f32(in.block_data_0 / 16u));
     let texture_offset = 1.0 / 16.0;
     let total_offset = texture_index * texture_offset;
-    //let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, vec2<f32>(corrected_position.x / 16.0 + total_offset.x, corrected_position.y / 16.0 + total_offset.y));
-    let object_color = vec4<f32>(1.0, 0.3, 0.3, 1.0);
+    let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, vec2<f32>(corrected_position.x / 16.0 + total_offset.x, corrected_position.y / 16.0 + total_offset.y));
     
     // We don't need (or want) much ambient light, so 0.1 is fine
     let ambient_strength = 0.1;
