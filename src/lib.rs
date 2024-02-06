@@ -1,12 +1,18 @@
-use std::{f32::consts::PI, path::Path, sync::{Arc, Mutex}};
+use std::{
+    f32::consts::PI,
+    path::Path,
+    sync::{Arc, Mutex},
+    thread,
+};
 
 use block::BlockType;
 use camera::{Camera, CameraController};
 use cgmath::prelude::*;
 use light::LightUniform;
+use log::info;
 use model::{DrawLight, DrawModel, ModelVertex};
+use notify::{event::ModifyKind, RecommendedWatcher, RecursiveMode, Watcher};
 use wgpu::util::DeviceExt;
-use notify::{Watcher, RecommendedWatcher, RecursiveMode};
 
 use winit::{
     event::WindowEvent,
@@ -214,23 +220,8 @@ impl Iterator for FileWatcher {
 
 impl State {
     // Creating some of the wgpu types requires async code
-    async fn new(window: Window) -> Self {
-
+    async fn new(window: Window, file_watcher: FileWatcher) -> Self {
         let size = window.inner_size();
-
-        // setup file watching
-        let file_watcher = FileWatcher::default();
-        let f = file_watcher.clone();
-        let mut watcher = notify::recommended_watcher(move |res| match res {
-            Ok(event) => f.write(""),
-            Err(e) => println!("watch error: {:?}", e),
-        }).expect("watcher failed");
-
-        watcher
-            .watch(Path::new("./res"), notify::RecursiveMode::Recursive)
-            .expect("watch failed");
-
-
 
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
@@ -423,7 +414,7 @@ impl State {
             instance_buffer,
             depth_texture,
             diffuse_bind_group,
-            file_watcher
+            file_watcher,
         }
     }
 
@@ -499,21 +490,28 @@ impl State {
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
 
+        let updated = self.file_watcher.clone().next();
+
         // if shader has updated, recreate render Pipeline
-        self.render_pipeline = {
-            let shader = wgpu::ShaderModuleDescriptor {
-                label: Some("Normal Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("../res/shader.wgsl").into()),
-            };
-            create_render_pipeline(
-                &self.device,
-                &self.render_pipeline_layout,
-                self.config.format,
-                Some(texture::Texture::DEPTH_FORMAT),
-                &[model::ModelVertex::desc(), InstanceRaw::desc()],
-                shader,
-            )
-        };
+        if let Some(path) = updated {
+            if path.ends_with("shader.wgsl") {
+                info!("Reloading shader");
+                // reload the shader 
+                let shader_source = std::fs::read_to_string(path).unwrap();
+                let shader = wgpu::ShaderModuleDescriptor {
+                    label: Some("Normal Shader"),
+                    source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+                };
+                self.render_pipeline = create_render_pipeline(
+                    &self.device,
+                    &self.render_pipeline_layout,
+                    self.config.format,
+                    Some(texture::Texture::DEPTH_FORMAT),
+                    &[model::ModelVertex::desc(), InstanceRaw::desc()],
+                    shader,
+                );
+            }
+        }
 
         let view = output
             .texture
@@ -634,10 +632,34 @@ fn create_render_pipeline(
 }
 
 pub async fn run() {
-    env_logger::init();
     let event_loop = EventLoop::new().unwrap();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
-    let mut state = State::new(window).await;
+
+    let file_watcher = FileWatcher::default();
+
+    // setup file watching
+    let f = file_watcher.clone();
+    let mut watcher = RecommendedWatcher::new(
+        move |result: Result<notify::Event, notify::Error>| {
+            let event = result.unwrap();
+            match event.kind {
+                notify::EventKind::Modify(ModifyKind::Data(_)) => {
+                    for path in event.paths {
+                        f.write(path.to_str().unwrap());
+                    }
+                }
+                _ => {}
+            }
+        },
+        notify::Config::default(),
+    )
+    .unwrap();
+
+    watcher
+        .watch(Path::new("res/"), RecursiveMode::Recursive)
+        .unwrap();
+
+    let mut state = State::new(window, file_watcher).await;
 
     event_loop
         .run(move |event, elwt| match event {
