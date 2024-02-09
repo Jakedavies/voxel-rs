@@ -51,14 +51,14 @@ impl Camera {
 
     pub fn raytrace(
         &self,
-        x: f32,
-        y: f32,
+        x: f64,
+        y: f64,
     ) -> (cgmath::Point3<f32>, cgmath::Vector3<f32>) {
         let (x, y) = (x * 2.0 - 1.0, 1.0 - y * 2.0);
         let proj = self.build_view_projection_matrix();
         let inv_proj = proj.invert().unwrap();
-        let near = inv_proj.transform_point(cgmath::Point3::new(x, y, -1.0));
-        let far = inv_proj.transform_point(cgmath::Point3::new(x, y, 1.0));
+        let near = inv_proj.transform_point(cgmath::Point3::new(x as f32, y as f32, -1.0));
+        let far = inv_proj.transform_point(cgmath::Point3::new(x as f32, y as f32, 1.0));
         let dir = (far - near).normalize();
         (near, dir)
     }

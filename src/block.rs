@@ -47,13 +47,25 @@ pub trait Chunk {
 }
 
 pub struct Chunk16 {
+    chunk_location: cgmath::Vector3<i32>,
     blocks: [Block; 16 * 16 * 16],
+}
+
+impl Chunk16 {
+    // get all blocks that intersect with a ray
+    pub fn query(&self, d0: cgmath::Point3<f32>, dir: cgmath::Vector3<f32>) -> Option<Block> {
+        let mut t = 0.0;
+        let mut current = d0;
+        let step = 0.1;
+        None
+    }
 }
 
 impl Default for Chunk16 {
     fn default() -> Self {
         let mut s = Self {
             blocks: [Block::default(); 16 * 16 * 16],
+            chunk_location: cgmath::Vector3::new(0, 0, 0),
         };
 
         for i in 0..16 {
@@ -106,12 +118,7 @@ impl Default for Chunk16 {
         s
     }
 }
-const SPACE_BETWEEN: f32 = 2.0;
-const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3 {
-    x: 1.0,
-    y: 1.0,
-    z: 1.0,
-};
+const BLOCK_SIZE: f32 = 2.0;
 
 impl Render for Chunk16 {
     fn render(&self) -> Vec<Instance> {
@@ -121,9 +128,9 @@ impl Render for Chunk16 {
                 for z in 0..16 {
                     let block = self.get_block(x, y, z);
                     if block.is_active {
-                        let x = SPACE_BETWEEN * (x as f32 - 16 as f32 / 2.0);
-                        let y = SPACE_BETWEEN * (y as f32 - 16 as f32 / 2.0);
-                        let z = SPACE_BETWEEN * (z as f32 - 16 as f32 / 2.0);
+                        let x = BLOCK_SIZE * (x as f32);
+                        let y = BLOCK_SIZE * (y as f32);
+                        let z = BLOCK_SIZE * (z as f32);
                         instances.push(Instance {
                             position: cgmath::Vector3 {
                                 x,

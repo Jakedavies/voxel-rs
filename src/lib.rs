@@ -9,7 +9,7 @@ use block::BlockType;
 use camera::{Camera, CameraController};
 use cgmath::prelude::*;
 use light::LightUniform;
-use log::{info, debug};
+use log::{debug, info};
 use model::{DrawLight, DrawModel, ModelVertex};
 use notify::{event::ModifyKind, RecommendedWatcher, RecursiveMode, Watcher};
 use wgpu::util::DeviceExt;
@@ -451,6 +451,13 @@ impl State {
                 PhysicalKey::Code(KeyCode::Space) => true,
                 _ => false,
             },
+            WindowEvent::CursorMoved { position, .. } => {
+                info!("{:?}", self.camera.raytrace(position.x, position.y));
+                let position = self.camera.raytrace(position.x, position.y);
+                self.chunk.query(position.0, position.1);
+                // figure out what is highlighted
+                true
+            }
             _ => false,
         }
     }
@@ -501,7 +508,7 @@ impl State {
         if let Some(path) = updated {
             if path.ends_with("shader.wgsl") {
                 info!("Reloading shader");
-                // reload the shader 
+                // reload the shader
                 let shader_source = std::fs::read_to_string(path).unwrap();
                 let shader = wgpu::ShaderModuleDescriptor {
                     label: Some("Normal Shader"),
