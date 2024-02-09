@@ -9,7 +9,7 @@ use block::BlockType;
 use camera::{Camera, CameraController};
 use cgmath::prelude::*;
 use light::LightUniform;
-use log::info;
+use log::{info, debug};
 use model::{DrawLight, DrawModel, ModelVertex};
 use notify::{event::ModifyKind, RecommendedWatcher, RecursiveMode, Watcher};
 use wgpu::util::DeviceExt;
@@ -424,8 +424,10 @@ impl State {
 
     // impl State
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+        info!("Resizing to {:?}", new_size);
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
+            self.camera.aspect = new_size.width as f32 / new_size.height as f32;
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
@@ -468,6 +470,7 @@ impl State {
             .iter()
             .map(Instance::to_raw)
             .collect::<Vec<_>>();
+
         self.queue.write_buffer(
             &self.instance_buffer,
             0,
@@ -485,6 +488,8 @@ impl State {
             0,
             bytemuck::cast_slice(&[self.light_uniform]),
         );
+
+        //info!("{:?}", self.camera.raytrace(0.5, 0.5))
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {

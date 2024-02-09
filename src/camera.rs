@@ -2,12 +2,8 @@ use cgmath::prelude::*;
 use winit::{
     event::WindowEvent,
     event::*,
-    event_loop::EventLoop,
-    keyboard::{Key, KeyCode, PhysicalKey},
-    window::Window,
-    window::WindowBuilder,
+    keyboard::{KeyCode, PhysicalKey},
 };
-
 
 #[derive(Debug)]
 pub struct Camera {
@@ -42,7 +38,6 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 0.0, 1.0,
 );
 
-
 impl Camera {
     pub fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
         // 1.
@@ -52,6 +47,20 @@ impl Camera {
 
         // 3.
         return OPENGL_TO_WGPU_MATRIX * proj * view;
+    }
+
+    pub fn raytrace(
+        &self,
+        x: f32,
+        y: f32,
+    ) -> (cgmath::Point3<f32>, cgmath::Vector3<f32>) {
+        let (x, y) = (x * 2.0 - 1.0, 1.0 - y * 2.0);
+        let proj = self.build_view_projection_matrix();
+        let inv_proj = proj.invert().unwrap();
+        let near = inv_proj.transform_point(cgmath::Point3::new(x, y, -1.0));
+        let far = inv_proj.transform_point(cgmath::Point3::new(x, y, 1.0));
+        let dir = (far - near).normalize();
+        (near, dir)
     }
 }
 pub struct CameraController {
@@ -76,11 +85,12 @@ impl CameraController {
     pub fn process_events(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::KeyboardInput {
-                event: KeyEvent {
-                    state,
-                    physical_key: PhysicalKey::Code(keycode),
-                    ..
-                },
+                event:
+                    KeyEvent {
+                        state,
+                        physical_key: PhysicalKey::Code(keycode),
+                        ..
+                    },
                 ..
             } => {
                 let is_pressed = *state == ElementState::Pressed;
@@ -129,8 +139,8 @@ impl CameraController {
         let forward_mag = forward.magnitude();
 
         if self.is_right_pressed {
-            // Rescale the distance between the target and the eye so 
-            // that it doesn't change. The eye, therefore, still 
+            // Rescale the distance between the target and the eye so
+            // that it doesn't change. The eye, therefore, still
             // lies on the circle made by the target and eye.
             camera.eye = camera.target - (forward + right * self.speed).normalize() * forward_mag;
         }
@@ -139,4 +149,3 @@ impl CameraController {
         }
     }
 }
-
