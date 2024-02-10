@@ -1,4 +1,5 @@
 use cgmath::prelude::*;
+use log::info;
 use winit::{
     event::WindowEvent,
     event::*,
@@ -51,16 +52,23 @@ impl Camera {
 
     pub fn raytrace(
         &self,
-        x: f64,
-        y: f64,
+        x: f32,
+        y: f32,
     ) -> (cgmath::Point3<f32>, cgmath::Vector3<f32>) {
-        let (x, y) = (x * 2.0 - 1.0, 1.0 - y * 2.0);
-        let proj = self.build_view_projection_matrix();
-        let inv_proj = proj.invert().unwrap();
-        let near = inv_proj.transform_point(cgmath::Point3::new(x as f32, y as f32, -1.0));
-        let far = inv_proj.transform_point(cgmath::Point3::new(x as f32, y as f32, 1.0));
-        let dir = (far - near).normalize();
-        (near, dir)
+        let ray_clip = cgmath::vec4(x, y, -1.0, 1.0);
+        let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
+        let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+        let ray_eye = proj.invert().unwrap() * ray_clip;
+        let ray_eye = cgmath::vec4(
+            ray_eye.x,
+            ray_eye.y,
+            -1.0,
+            0.0,
+        );
+        let ray_world = view.invert().unwrap() * ray_eye;
+        let ray_world = ray_world.truncate().normalize();
+        info!("eye: {:?} ray_world: {:?}", ray_eye, ray_world);
+        (self.eye, ray_world)
     }
 }
 pub struct CameraController {

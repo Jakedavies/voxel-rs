@@ -452,9 +452,12 @@ impl State {
                 _ => false,
             },
             WindowEvent::CursorMoved { position, .. } => {
-                info!("{:?}", self.camera.raytrace(position.x, position.y));
-                let position = self.camera.raytrace(position.x, position.y);
-                self.chunk.query(position.0, position.1);
+                let normalized = (
+                    position.x as f32 * 2.0 / self.size.width as f32 - 1.0,
+                    position.y as f32 * 2.0 / self.size.height as f32 - 1.0,
+                );
+                let position = self.camera.raytrace(normalized.0, normalized.1);
+                self.chunk.raycast(position.0, position.1);
                 // figure out what is highlighted
                 true
             }

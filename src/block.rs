@@ -1,7 +1,13 @@
+use cgmath::{ElementWise, Vector3};
+use log::info;
+
 use crate::Instance;
 
-#[derive(Copy, Clone, Debug)]
+const CHUNK_SIZE: usize = 1;
+
+#[derive(Copy, Clone, Debug, Default)]
 pub enum BlockType {
+    #[default]
     Dirt,
     Grass,
     Stone,
@@ -10,18 +16,31 @@ pub enum BlockType {
     Ore,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone)]
 pub struct Block {
     is_active: bool,
+    is_selected: bool,
     t: BlockType,
+    chunk_location: cgmath::Vector3<u8>,
 }
 
-impl Default for Block {
-    fn default() -> Self {
+impl Block {
+    fn new() -> Self {
         Self {
-            is_active: true,
+            is_active: false,
+            is_selected: false,
             t: BlockType::Stone,
+            chunk_location: cgmath::Vector3::new(0, 0, 0),
         }
+    }
+
+    fn block_to_aabb(&self, chunk: Vector3<i32>) -> aabb {
+        let x = (chunk.x as f32 * 16.0 + (self.chunk_location.x as f32)) * BLOCK_SIZE - BLOCK_SIZE / 2.0;
+        let y = (chunk.y as f32 * 16.0 + (self.chunk_location.y as f32)) * BLOCK_SIZE - BLOCK_SIZE / 2.0;
+        let z = (chunk.z as f32 * 16.0 + (self.chunk_location.z as f32)) * BLOCK_SIZE - BLOCK_SIZE / 2.0;
+        let min = cgmath::Point3::new(x, y, z);
+        let max = cgmath::Point3::new(x + BLOCK_SIZE, y + BLOCK_SIZE, z + BLOCK_SIZE);
+        aabb { min, max }
     }
 }
 
@@ -43,77 +62,104 @@ pub trait Render {
 
 pub trait Chunk {
     fn get_block(&self, x: u8, y: u8, z: u8) -> &Block;
+    fn get_block_mut(&mut self, x: u8, y: u8, z: u8) -> &mut Block;
     fn set_block(&mut self, x: u8, y: u8, z: u8, block: Block);
 }
 
 pub struct Chunk16 {
-    chunk_location: cgmath::Vector3<i32>,
-    blocks: [Block; 16 * 16 * 16],
+    location: cgmath::Vector3<i32>,
+    blocks: [Block; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE],
+}
+
+#[derive(Debug)]
+struct aabb {
+    min: cgmath::Point3<f32>,
+    max: cgmath::Point3<f32>,
+}
+
+impl aabb {
+    fn intersect_ray(
+        &self,
+        d0: cgmath::Point3<f32>,
+        dir: cgmath::Vector3<f32>,
+    ) -> Option<[f32; 2]> {
+        let t1 = (self.min - d0).div_element_wise(dir);
+        let t2 = (self.max - d0).div_element_wise(dir);
+        let t_min = t1.zip(t2, f32::min);
+        let t_max = t1.zip(t2, f32::max);
+
+        let mut hit_near = t_min.x;
+        let mut hit_far = t_max.x;
+
+        if hit_near > t_max.y || t_min.y > hit_far {
+            return None;
+        }
+
+        if t_min.y > hit_near {
+            hit_near = t_min.y;
+        }
+        if t_max.y < hit_far {
+            hit_far = t_max.y;
+        }
+
+        if (hit_near > t_max.z) || (t_min.z > hit_far) {
+            return None;
+        }
+
+        if t_min.z > hit_near {
+            hit_near = t_min.z;
+        }
+        if t_max.z < hit_far {
+            hit_far = t_max.z;
+        }
+        Some([hit_near, hit_far])
+    }
 }
 
 impl Chunk16 {
     // get all blocks that intersect with a ray
-    pub fn query(&self, d0: cgmath::Point3<f32>, dir: cgmath::Vector3<f32>) -> Option<Block> {
-        let mut t = 0.0;
-        let mut current = d0;
-        let step = 0.1;
-        None
+    pub fn raycast(&mut self, d0: cgmath::Point3<f32>, dir: cgmath::Vector3<f32>) {
+        let mut candidates = Vec::new();
+        let location = self.location;
+        for block in self.blocks.iter_mut() {
+            if block.is_active {
+                let aabb = block.block_to_aabb(location);
+                if let Some(hit) = aabb.intersect_ray(d0, dir) {
+                    info!("hit: {:?}", hit);
+                    candidates.push((block, hit));
+                }
+            }
+        }
+        candidates.sort_by(|a, b| a.1[0].partial_cmp(&b.1[0]).unwrap());
+        if let Some(c) = candidates.first_mut() {
+            c.0.is_selected = true;
+        };
     }
 }
 
 impl Default for Chunk16 {
     fn default() -> Self {
         let mut s = Self {
-            blocks: [Block::default(); 16 * 16 * 16],
-            chunk_location: cgmath::Vector3::new(0, 0, 0),
+            blocks: [Block::new(); CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE],
+            location: cgmath::Vector3::new(0, 0, 0),
         };
-
-        for i in 0..16 {
-            for j in 0..16 {
-                s.set_block(
-                    i,
-                    15,
-                    j,
-                    Block {
-                        is_active: true,
-                        t: BlockType::Grass,
-                    },
-                );
-                s.set_block(
-                    i,
-                    14,
-                    j,
-                    Block {
-                        is_active: true,
-                        t: BlockType::Dirt,
-                    },
-                );
-                s.set_block(
-                    i,
-                    13,
-                    j,
-                    Block {
-                        is_active: true,
-                        t: BlockType::Dirt,
-                    },
-                );
+        // set all the positions for blocks
+        for i in 0..CHUNK_SIZE as u8 {
+            for j in 0..CHUNK_SIZE as u8 {
+                for k in 0..CHUNK_SIZE as u8 {
+                    s.set_block(
+                        i,
+                        j,
+                        k,
+                        Block {
+                            is_active: true,
+                            is_selected: false,
+                            t: BlockType::Stone,
+                            chunk_location: cgmath::Vector3::new(i, j, k),
+                        },
+                    );
+                }
             }
-        }
-
-        // randomly select some blocks in lower layers to turn to ore
-        for _ in 0..100 {
-            let x = rand::random::<u8>() % 16;
-            let y = rand::random::<u8>() % 13;
-            let z = rand::random::<u8>() % 16;
-            s.set_block(
-                x,
-                y,
-                z,
-                Block {
-                    is_active: true,
-                    t: BlockType::Ore,
-                },
-            );
         }
         s
     }
@@ -122,36 +168,24 @@ const BLOCK_SIZE: f32 = 2.0;
 
 impl Render for Chunk16 {
     fn render(&self) -> Vec<Instance> {
-        let mut instances = Vec::new();
-        for x in 0..16 {
-            for y in 0..16 {
-                for z in 0..16 {
-                    let block = self.get_block(x, y, z);
-                    if block.is_active {
-                        let x = BLOCK_SIZE * (x as f32);
-                        let y = BLOCK_SIZE * (y as f32);
-                        let z = BLOCK_SIZE * (z as f32);
-                        instances.push(Instance {
-                            position: cgmath::Vector3 {
-                                x,
-                                y,
-                                z,
-                            },
-                            block_type: block.t,
-                            ..Default::default()
-                        });
-                    }
+        self.blocks
+            .iter()
+            .filter(|block| block.is_active)
+            .map(|block| {
+                Instance {
+                    position: block.chunk_location.cast::<f32>().unwrap() * BLOCK_SIZE,
+                    block_type: block.t,
+                    ..Default::default()
                 }
-            }
-        }
-        instances
+            })
+            .collect()
     }
 }
 
 impl Chunk16 {
     fn xyz_to_index(x: u8, y: u8, z: u8) -> usize {
         let (x, y, z) = (x as usize, y as usize, z as usize);
-        x + y * 16 + z * 16 * 16
+        x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE
     }
 }
 
@@ -159,6 +193,11 @@ impl Chunk for Chunk16 {
     fn get_block(&self, x: u8, y: u8, z: u8) -> &Block {
         let index = Self::xyz_to_index(x, y, z);
         &self.blocks[index]
+    }
+
+    fn get_block_mut(&mut self, x: u8, y: u8, z: u8) -> &mut Block {
+        let index = Self::xyz_to_index(x, y, z);
+        &mut self.blocks[index]
     }
 
     fn set_block(&mut self, x: u8, y: u8, z: u8, block: Block) {
