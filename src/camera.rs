@@ -61,7 +61,7 @@ impl Camera {
         let ray_eye = proj.invert().unwrap() * ray_clip;
         let ray_eye = cgmath::vec4(
             ray_eye.x,
-            ray_eye.y,
+            -ray_eye.y,
             -1.0,
             0.0,
         );

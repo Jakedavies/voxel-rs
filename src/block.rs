@@ -35,11 +35,17 @@ impl Block {
     }
 
     fn block_to_aabb(&self, chunk: Vector3<i32>) -> aabb {
-        let x = (chunk.x as f32 * 16.0 + (self.chunk_location.x as f32)) * BLOCK_SIZE - BLOCK_SIZE / 2.0;
-        let y = (chunk.y as f32 * 16.0 + (self.chunk_location.y as f32)) * BLOCK_SIZE - BLOCK_SIZE / 2.0;
-        let z = (chunk.z as f32 * 16.0 + (self.chunk_location.z as f32)) * BLOCK_SIZE - BLOCK_SIZE / 2.0;
-        let min = cgmath::Point3::new(x, y, z);
-        let max = cgmath::Point3::new(x + BLOCK_SIZE, y + BLOCK_SIZE, z + BLOCK_SIZE);
+        let origin = self.chunk_location.cast::<f32>().unwrap() * BLOCK_SIZE;
+        let min = cgmath::Point3::new(
+            origin.x + chunk.x as f32 * CHUNK_SIZE as f32 * BLOCK_SIZE - BLOCK_SIZE / 2.0,
+            origin.y + chunk.y as f32 * CHUNK_SIZE as f32 * BLOCK_SIZE - BLOCK_SIZE / 2.0,
+            origin.z + chunk.z as f32 * CHUNK_SIZE as f32 * BLOCK_SIZE - BLOCK_SIZE / 2.0,
+        );
+        let max = cgmath::Point3::new(
+            min.x + BLOCK_SIZE,
+            min.y + BLOCK_SIZE,
+            min.z + BLOCK_SIZE,
+        );
         aabb { min, max }
     }
 }
@@ -119,6 +125,7 @@ impl aabb {
 impl Chunk16 {
     // get all blocks that intersect with a ray
     pub fn raycast(&mut self, d0: cgmath::Point3<f32>, dir: cgmath::Vector3<f32>) {
+
         let mut candidates = Vec::new();
         let location = self.location;
         for block in self.blocks.iter_mut() {
