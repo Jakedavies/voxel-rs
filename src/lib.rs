@@ -41,6 +41,7 @@ pub struct Instance {
     position: cgmath::Vector3<f32>,
     rotation: cgmath::Quaternion<f32>,
     block_type: BlockType,
+    is_selected: bool,
 }
 
 impl Default for Instance {
@@ -52,6 +53,7 @@ impl Default for Instance {
                 cgmath::Deg(0.0),
             ),
             block_type: BlockType::Dirt,
+            is_selected: false,
         }
     }
 }
@@ -66,12 +68,19 @@ struct InstanceRaw {
 
 impl Instance {
     fn to_raw(&self) -> InstanceRaw {
+        let block_data_0 = 0u32;
+        let block_data_0 = block_data_0 
+            | self.block_type.to_chunk_data()
+            | if self.is_selected { 1 << 8 } else { 0 };
+
+        info!("block_data_0: {}", block_data_0);
+
         InstanceRaw {
             model: (cgmath::Matrix4::from_translation(self.position)
                 * cgmath::Matrix4::from(self.rotation))
             .into(),
             normal: cgmath::Matrix3::from(self.rotation).into(),
-            block_data_0: self.block_type.to_chunk_data(),
+            block_data_0,
         }
     }
 }
@@ -498,8 +507,6 @@ impl State {
             0,
             bytemuck::cast_slice(&[self.light_uniform]),
         );
-
-        //info!("{:?}", self.camera.raytrace(0.5, 0.5))
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {

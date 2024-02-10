@@ -3,7 +3,7 @@ use log::info;
 
 use crate::Instance;
 
-const CHUNK_SIZE: usize = 1;
+const CHUNK_SIZE: usize = 16;
 
 #[derive(Copy, Clone, Debug, Default)]
 pub enum BlockType {
@@ -127,13 +127,19 @@ impl Chunk16 {
                 if let Some(hit) = aabb.intersect_ray(d0, dir) {
                     info!("hit: {:?}", hit);
                     candidates.push((block, hit));
+                } else {
+                    block.is_selected = false;
                 }
+
             }
         }
         candidates.sort_by(|a, b| a.1[0].partial_cmp(&b.1[0]).unwrap());
         if let Some(c) = candidates.first_mut() {
             c.0.is_selected = true;
         };
+        for c in candidates.iter_mut().skip(1) {
+            c.0.is_selected = false;
+        }
     }
 }
 
@@ -175,6 +181,7 @@ impl Render for Chunk16 {
                 Instance {
                     position: block.chunk_location.cast::<f32>().unwrap() * BLOCK_SIZE,
                     block_type: block.t,
+                    is_selected: block.is_selected,
                     ..Default::default()
                 }
             })

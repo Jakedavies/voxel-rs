@@ -94,20 +94,26 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         uv = in.position.xy;
     }
 
+    let selected = in.block_data_0 & 0x0000FF00u;
+
     // dot normal and position to get a uv coordinate
     //let uv = vec2<f32>(dot(in.normal.zxy, in.position), dot(in.normal.yzx, in.position));
     // convert position to a color for debugging
     let corrected_position = 1.0 - (uv + vec2<f32>(1.0, 1.0)) / 2.0;
     //let object_color: vec4<f32> = vec4<f32>(corrected_position.x, corrected_position.y,  0.0, 1.0);
+
+    let texture_index = in.block_data_0 & 0x000000FFu;
     
-    let a = in.block_data_0 % 16u;
-    let texture_index = vec2<f32>(f32(a), f32(in.block_data_0 / 16u));
+    let texture_position = vec2<f32>(f32(texture_index % 16u), f32(texture_index / 16u));
     let texture_offset = 1.0 / 16.0;
-    let total_offset = texture_index * texture_offset;
+    let total_offset = texture_position * texture_offset;
     let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, vec2<f32>(corrected_position.x / 16.0 + total_offset.x, corrected_position.y / 16.0 + total_offset.y));
     
     // We don't need (or want) much ambient light, so 0.1 is fine
-    let ambient_strength = 0.2;
+    var ambient_strength = 0.2;
+    if selected != 0u {
+        ambient_strength = 0.5;
+    }
     let ambient_color = light.color * ambient_strength;
 
     let light_dir = normalize(light.position - in.world_position);
