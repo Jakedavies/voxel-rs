@@ -69,11 +69,9 @@ struct InstanceRaw {
 impl Instance {
     fn to_raw(&self) -> InstanceRaw {
         let block_data_0 = 0u32;
-        let block_data_0 = block_data_0 
+        let block_data_0 = block_data_0
             | self.block_type.to_chunk_data()
             | if self.is_selected { 1 << 8 } else { 0 };
-
-        info!("block_data_0: {}", block_data_0);
 
         InstanceRaw {
             model: (cgmath::Matrix4::from_translation(self.position)
@@ -296,7 +294,8 @@ impl State {
         let (texture_bind_group_layout, diffuse_bind_group) = texture::setup(&device, &queue).await;
 
         let camera = Camera {
-            eye: (0.0, 20., 80.0).into(),
+            eye: (15.0, 15., 80.0).into(),
+            target: (15.0, 15.0, 0.0).into(),
             aspect: config.width as f32 / config.height as f32,
             ..Camera::default()
         };
@@ -461,12 +460,11 @@ impl State {
                 _ => false,
             },
             WindowEvent::CursorMoved { position, .. } => {
-                let normalized = (
-                    position.x as f32 * 2.0 / self.size.width as f32 - 1.0,
-                    position.y as f32 * 2.0 / self.size.height as f32 - 1.0,
-                );
-                let position = self.camera.raytrace(normalized.0, normalized.1);
-                self.chunk.raycast(position.0, position.1);
+                let mouse_ndc_x = 2.0 * (position.x as f32/ self.size.width as f32) - 1.0;
+                let mouse_ndc_y = 1.0 - 2.0 * (position.y as f32 / self.size.height as f32);
+                info!("Mouse NDC: {}, {}", mouse_ndc_x, mouse_ndc_y);
+                let position = self.camera.raytrace(mouse_ndc_x, mouse_ndc_y);
+                self.chunk.collision_check(position.0, position.1);
                 // figure out what is highlighted
                 true
             }

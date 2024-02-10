@@ -37,9 +37,9 @@ impl Block {
     fn block_to_aabb(&self, chunk: Vector3<i32>) -> aabb {
         let origin = self.chunk_location.cast::<f32>().unwrap() * BLOCK_SIZE;
         let min = cgmath::Point3::new(
-            origin.x + chunk.x as f32 * CHUNK_SIZE as f32 * BLOCK_SIZE - BLOCK_SIZE / 2.0,
-            origin.y + chunk.y as f32 * CHUNK_SIZE as f32 * BLOCK_SIZE - BLOCK_SIZE / 2.0,
-            origin.z + chunk.z as f32 * CHUNK_SIZE as f32 * BLOCK_SIZE - BLOCK_SIZE / 2.0,
+            origin.x - BLOCK_SIZE / 2.0,
+            origin.y - BLOCK_SIZE / 2.0,
+            origin.z - BLOCK_SIZE / 2.0,
         );
         let max = cgmath::Point3::new(
             min.x + BLOCK_SIZE,
@@ -124,15 +124,15 @@ impl aabb {
 
 impl Chunk16 {
     // get all blocks that intersect with a ray
-    pub fn raycast(&mut self, d0: cgmath::Point3<f32>, dir: cgmath::Vector3<f32>) {
-
+    pub fn collision_check(&mut self, d0: cgmath::Point3<f32>, dir: cgmath::Vector3<f32>) {
         let mut candidates = Vec::new();
         let location = self.location;
         for block in self.blocks.iter_mut() {
             if block.is_active {
                 let aabb = block.block_to_aabb(location);
                 if let Some(hit) = aabb.intersect_ray(d0, dir) {
-                    info!("hit: {:?}", hit);
+                    let position = d0 + dir * hit[0];
+                    info!("Block: {:?} hit: {:?}", block.chunk_location, position);
                     candidates.push((block, hit));
                 } else {
                     block.is_selected = false;
@@ -142,6 +142,7 @@ impl Chunk16 {
         }
         candidates.sort_by(|a, b| a.1[0].partial_cmp(&b.1[0]).unwrap());
         if let Some(c) = candidates.first_mut() {
+            info!("Selected block: {:?}", c.0.chunk_location);
             c.0.is_selected = true;
         };
         for c in candidates.iter_mut().skip(1) {

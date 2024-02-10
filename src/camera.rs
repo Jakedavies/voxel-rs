@@ -25,7 +25,7 @@ impl Default for Camera {
             up: cgmath::Vector3::unit_y(),
             aspect: 1.0,
             fovy: 45.0,
-            znear: 0.1,
+            znear: 10.0,
             zfar: 100.0,
         }
     }
@@ -47,24 +47,15 @@ impl Camera {
         let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
 
         // 3.
-        return OPENGL_TO_WGPU_MATRIX * proj * view;
+        OPENGL_TO_WGPU_MATRIX * proj * view
     }
 
-    pub fn raytrace(
-        &self,
-        x: f32,
-        y: f32,
-    ) -> (cgmath::Point3<f32>, cgmath::Vector3<f32>) {
+    pub fn raytrace(&self, x: f32, y: f32) -> (cgmath::Point3<f32>, cgmath::Vector3<f32>) {
         let ray_clip = cgmath::vec4(x, y, -1.0, 1.0);
         let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
         let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
         let ray_eye = proj.invert().unwrap() * ray_clip;
-        let ray_eye = cgmath::vec4(
-            ray_eye.x,
-            -ray_eye.y,
-            -1.0,
-            0.0,
-        );
+        let ray_eye = cgmath::vec4(ray_eye.x, ray_eye.y, -1.0, 0.0);
         let ray_world = view.invert().unwrap() * ray_eye;
         let ray_world = ray_world.truncate().normalize();
         info!("eye: {:?} ray_world: {:?}", ray_eye, ray_world);
@@ -77,6 +68,8 @@ pub struct CameraController {
     is_backward_pressed: bool,
     is_left_pressed: bool,
     is_right_pressed: bool,
+    is_strafe_left_pressed: bool,
+    is_strafe_right_pressed: bool,
 }
 
 impl CameraController {
@@ -87,6 +80,8 @@ impl CameraController {
             is_backward_pressed: false,
             is_left_pressed: false,
             is_right_pressed: false,
+            is_strafe_left_pressed: false,
+            is_strafe_right_pressed: false,
         }
     }
 
@@ -109,6 +104,14 @@ impl CameraController {
                     }
                     KeyCode::KeyA | KeyCode::ArrowLeft => {
                         self.is_left_pressed = is_pressed;
+                        true
+                    }
+                    KeyCode::KeyQ => {
+                        self.is_strafe_left_pressed = is_pressed;
+                        true
+                    }
+                    KeyCode::KeyE => {
+                        self.is_strafe_right_pressed = is_pressed;
                         true
                     }
                     KeyCode::KeyS | KeyCode::ArrowDown => {
@@ -154,6 +157,15 @@ impl CameraController {
         }
         if self.is_left_pressed {
             camera.eye = camera.target - (forward - right * self.speed).normalize() * forward_mag;
+        }
+
+        if self.is_strafe_left_pressed {
+            camera.eye += right * self.speed;
+            camera.target += right * self.speed;
+        }
+        if self.is_strafe_right_pressed {
+            camera.eye -= right * self.speed;
+            camera.target -= right * self.speed;
         }
     }
 }
