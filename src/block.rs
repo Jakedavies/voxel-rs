@@ -132,7 +132,6 @@ impl Chunk16 {
                 let aabb = block.block_to_aabb(location);
                 if let Some(hit) = aabb.intersect_ray(d0, dir) {
                     let position = d0 + dir * hit[0];
-                    info!("Block: {:?} hit: {:?}", block.chunk_location, position);
                     candidates.push((block, hit));
                 } else {
                     block.is_selected = false;
