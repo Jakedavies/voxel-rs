@@ -2,7 +2,8 @@ use std::{
     f32::consts::PI,
     path::Path,
     sync::{Arc, Mutex},
-    thread, time::Instant,
+    thread,
+    time::Instant, collections::HashMap,
 };
 
 use block::BlockType;
@@ -37,6 +38,8 @@ mod resources;
 mod texture;
 mod voxel;
 
+const CHUNK_RENDER_DISTANCE: i32 = 1;
+
 pub struct Instance {
     position: cgmath::Vector3<f32>,
     rotation: cgmath::Quaternion<f32>,
@@ -64,6 +67,16 @@ struct InstanceRaw {
     model: [[f32; 4]; 4],
     normal: [[f32; 3]; 3],
     block_data_0: u32,
+}
+
+impl Default for InstanceRaw {
+    fn default() -> Self {
+        Self {
+            model: cgmath::Matrix4::identity().into(),
+            normal: cgmath::Matrix3::identity().into(),
+            block_data_0: 0,
+        }
+    }
 }
 
 impl Instance {
@@ -185,16 +198,16 @@ struct State {
     light_render_pipeline: wgpu::RenderPipeline,
     light_bind_group: wgpu::BindGroup,
     light_buffer: wgpu::Buffer,
-    instances: Vec<Instance>,
-    instance_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
-    obj_model: model::Model,
     diffuse_bind_group: wgpu::BindGroup,
+    instance_buffer: wgpu::Buffer,
+    instances: Vec<Instance>,
     // The window must be declared after the surface so
     // it gets dropped after it as the surface contains
     // unsafe references to the window's resources.
+    obj_model: model::Model,
     window: Window,
-    chunk: Chunk16,
+    chunks: Vec<Chunk16>,
     file_watcher: FileWatcher,
     mouse_pressed: bool,
 }
@@ -277,7 +290,7 @@ impl State {
 
         let surface_caps = surface.get_capabilities(&adapter);
         // Shader code in this tutorial assumes an sRGB surface texture. Using a different
-        // one will result in all the colors coming out darker. If you want to support non
+        // one will result in all 1he uolors coming out daruer. If you want to support non
         // sRGB surfaces, you'll need to account for that when drawing to the frame.
         let surface_format = surface_caps
             .formats
@@ -387,22 +400,22 @@ impl State {
             )
         };
 
-        let chunk = Chunk16::default();
-        let instances = chunk.render();
-
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instance_data),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let obj_model = voxel::load_block(&device, &queue).await.unwrap();
+        let chunks = vec![Chunk16::default()];
 
         window.set_cursor_visible(false);
         window
             .set_cursor_grab(winit::window::CursorGrabMode::Confined)
             .unwrap();
+
+        const total_chunks: i32 = (CHUNK_RENDER_DISTANCE * 2 + 1) * (CHUNK_RENDER_DISTANCE * 2 + 1);
+        const expected_instance_count: i32 = 16 * 16 * 16 * total_chunks;
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: bytemuck::cast_slice(&[InstanceRaw::default(); expected_instance_count as usize]),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let obj_model = voxel::load_block(&device, &queue).unwrap();
 
         Self {
             window,
@@ -410,24 +423,24 @@ impl State {
             device,
             queue,
             config,
-            chunk,
+            chunks,
             size,
             bg_color: wgpu::Color::BLACK,
             render_pipeline,
             render_pipeline_layout,
-            obj_model,
             camera_uniform,
             camera_buffer,
             projection,
             camera_bind_group,
             light_buffer,
             light_uniform,
+            instances: vec![],
+            instance_buffer,
             light_bind_group,
+            obj_model,
             light_render_pipeline,
             camera,
             camera_controller,
-            instances,
-            instance_buffer,
             depth_texture,
             diffuse_bind_group,
             file_watcher,
@@ -490,19 +503,53 @@ impl State {
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
+        
+        // update loaded chunks based on camera position
+        let camera_pos = self.camera.position;
+        let camera_chunk = (
+            (camera_pos.x / (32.0)).floor() as i32,
+            (camera_pos.z / (32.0)).floor() as i32,
+        );
 
-        let instance_data = self
-            .chunk
-            .render()
+
+        let mut loaded = HashMap::<(i32, i32), bool>::new();
+        // unload oob chunks
+        self.chunks.retain(|c| {
+            let chunk_pos = c.location;
+            let distance = (
+                (chunk_pos.x - camera_chunk.0).abs(),
+                (chunk_pos.z - camera_chunk.1).abs(),
+            );
+            if distance.0 > CHUNK_RENDER_DISTANCE || distance.1 > CHUNK_RENDER_DISTANCE {
+                false
+            } else {
+                loaded.insert((chunk_pos.x, chunk_pos.z), true);
+                true
+            }
+        });
+
+        for x in -CHUNK_RENDER_DISTANCE..=CHUNK_RENDER_DISTANCE {
+            for z in -CHUNK_RENDER_DISTANCE..=CHUNK_RENDER_DISTANCE {
+                let chunk_pos = (camera_chunk.0 + x, camera_chunk.1 + z);
+                if loaded.contains_key(&chunk_pos) {
+                    continue;
+                }
+                let chunk = Chunk16::new(chunk_pos.0, 0, chunk_pos.1);
+                self.chunks.push(chunk);
+            }
+        }
+
+        self.instances = self
+            .chunks
             .iter()
-            .map(Instance::to_raw)
+            .flat_map(|c| c.render())
             .collect::<Vec<_>>();
 
-        self.queue.write_buffer(
-            &self.instance_buffer,
-            0,
-            bytemuck::cast_slice(&instance_data),
-        );
+        info!("{} instances", self.instances.len());
+        let instance_data = self.instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+       
+        self.queue
+            .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instance_data));
 
         // Update the light
         let old_position: cgmath::Vector3<_> = self.light_uniform.position.into();

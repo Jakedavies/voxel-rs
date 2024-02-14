@@ -5,7 +5,7 @@ use wgpu::util::DeviceExt;
 
 use crate::{model, texture};
 
-pub async fn load_block(device: &wgpu::Device, queue: &wgpu::Queue) -> anyhow::Result<Model> {
+pub fn load_block(device: &wgpu::Device, queue: &wgpu::Queue) -> anyhow::Result<Model> {
     let vertices = [
         // Top
         ModelVertex::new([1.0, 1.0, 1.0], [0.0, 1.0, 0.0]),

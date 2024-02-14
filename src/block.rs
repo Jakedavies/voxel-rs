@@ -73,7 +73,7 @@ pub trait Chunk {
 }
 
 pub struct Chunk16 {
-    location: cgmath::Vector3<i32>,
+    pub location: cgmath::Vector3<i32>,
     blocks: [Block; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE],
 }
 
@@ -123,6 +123,13 @@ impl aabb {
 }
 
 impl Chunk16 {
+    pub fn new(x: i32, y: i32, z: i32) -> Self {
+        Self {
+            location: cgmath::Vector3::new(x, y, z),
+            ..Default::default()
+        }
+    }
+
     // get all blocks that intersect with a ray
     pub fn collision_check(&mut self, d0: cgmath::Point3<f32>, dir: cgmath::Vector3<f32>) {
         let mut candidates = Vec::new();
@@ -181,12 +188,14 @@ const BLOCK_SIZE: f32 = 2.0;
 
 impl Render for Chunk16 {
     fn render(&self) -> Vec<Instance> {
+        let chunk_offset = self.location.cast::<f32>().unwrap() * BLOCK_SIZE * CHUNK_SIZE as f32;
         self.blocks
             .iter()
             .filter(|block| block.is_active)
             .map(|block| {
+                let position = block.chunk_location.cast::<f32>().unwrap() * BLOCK_SIZE + chunk_offset;
                 Instance {
-                    position: block.chunk_location.cast::<f32>().unwrap() * BLOCK_SIZE,
+                    position,
                     block_type: block.t,
                     is_selected: block.is_selected,
                     ..Default::default()
