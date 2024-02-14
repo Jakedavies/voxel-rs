@@ -1,9 +1,10 @@
 use std::{
+    collections::HashMap,
     f32::consts::PI,
     path::Path,
     sync::{Arc, Mutex},
     thread,
-    time::Instant, collections::HashMap,
+    time::Instant,
 };
 
 use block::BlockType;
@@ -411,7 +412,9 @@ impl State {
         const expected_instance_count: i32 = 16 * 16 * 16 * total_chunks;
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&[InstanceRaw::default(); expected_instance_count as usize]),
+            contents: bytemuck::cast_slice(
+                &[InstanceRaw::default(); expected_instance_count as usize],
+            ),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -503,7 +506,7 @@ impl State {
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
-        
+
         // update loaded chunks based on camera position
         let camera_pos = self.camera.position;
         let camera_chunk = (
@@ -511,8 +514,8 @@ impl State {
             (camera_pos.z / (32.0)).floor() as i32,
         );
 
-
         let mut loaded = HashMap::<(i32, i32), bool>::new();
+        let mut dirty = false;
         // unload oob chunks
         self.chunks.retain(|c| {
             let chunk_pos = c.location;
@@ -524,6 +527,7 @@ impl State {
                 false
             } else {
                 loaded.insert((chunk_pos.x, chunk_pos.z), true);
+                dirty = true;
                 true
             }
         });
@@ -539,17 +543,26 @@ impl State {
             }
         }
 
-        self.instances = self
-            .chunks
-            .iter()
-            .flat_map(|c| c.render())
-            .collect::<Vec<_>>();
+        if dirty {
+            self.instances = self
+                .chunks
+                .iter()
+                .flat_map(|c| c.render())
+                .collect::<Vec<_>>();
 
-        info!("{} instances", self.instances.len());
-        let instance_data = self.instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-       
-        self.queue
-            .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instance_data));
+            info!("{} instances", self.instances.len());
+            let instance_data = self
+                .instances
+                .iter()
+                .map(Instance::to_raw)
+                .collect::<Vec<_>>();
+
+            self.queue.write_buffer(
+                &self.instance_buffer,
+                0,
+                bytemuck::cast_slice(&instance_data),
+            );
+        }
 
         // Update the light
         let old_position: cgmath::Vector3<_> = self.light_uniform.position.into();
