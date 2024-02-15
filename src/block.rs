@@ -1,9 +1,9 @@
-use cgmath::{ElementWise, Vector3};
+use cgmath::{ElementWise, Vector3, Point3};
 use log::info;
 
-use crate::Instance;
+use crate::{aabb::Aabb, Instance};
 
-const CHUNK_SIZE: usize = 16;
+pub const BLOCK_SIZE: f32 = 2.0;
 
 #[derive(Copy, Clone, Debug, Default)]
 pub enum BlockType {
@@ -14,40 +14,6 @@ pub enum BlockType {
     Wood,
     Water,
     Ore,
-}
-
-#[derive(Copy, Clone)]
-pub struct Block {
-    is_active: bool,
-    is_selected: bool,
-    t: BlockType,
-    chunk_location: cgmath::Vector3<u8>,
-}
-
-impl Block {
-    fn new() -> Self {
-        Self {
-            is_active: false,
-            is_selected: false,
-            t: BlockType::Stone,
-            chunk_location: cgmath::Vector3::new(0, 0, 0),
-        }
-    }
-
-    fn block_to_aabb(&self, chunk: Vector3<i32>) -> aabb {
-        let origin = self.chunk_location.cast::<f32>().unwrap() * BLOCK_SIZE;
-        let min = cgmath::Point3::new(
-            origin.x - BLOCK_SIZE / 2.0,
-            origin.y - BLOCK_SIZE / 2.0,
-            origin.z - BLOCK_SIZE / 2.0,
-        );
-        let max = cgmath::Point3::new(
-            min.x + BLOCK_SIZE,
-            min.y + BLOCK_SIZE,
-            min.z + BLOCK_SIZE,
-        );
-        aabb { min, max }
-    }
 }
 
 impl BlockType {
@@ -62,169 +28,40 @@ impl BlockType {
     }
 }
 
+#[derive(Copy, Clone)]
+pub struct Block {
+    pub is_active: bool,
+    pub is_selected: bool,
+    pub t: BlockType,
+    chunk_space_origin: cgmath::Point3<u8>,
+}
+
+impl Block {
+    pub fn new(position: Point3<u8>) -> Self {
+        Self {
+            is_active: true,
+            is_selected: false,
+            t: BlockType::Stone,
+            chunk_space_origin: position,
+        }
+    }
+
+    pub fn origin(&self) -> Point3<f32> {
+        self.chunk_space_origin.cast::<f32>().unwrap() * BLOCK_SIZE
+    }
+}
+
+impl Aabb for Block {
+    fn min(&self) -> Point3<f32> {
+        self.origin() - Vector3::new(BLOCK_SIZE / 2.0, BLOCK_SIZE / 2.0, BLOCK_SIZE / 2.0)
+    }
+    fn max(&self) -> Point3<f32> {
+        self.origin() + Vector3::new(BLOCK_SIZE / 2.0, BLOCK_SIZE / 2.0, BLOCK_SIZE / 2.0)
+    }
+}
+
 pub trait Render {
     fn render(&self) -> Vec<Instance>;
 }
 
-pub trait Chunk {
-    fn get_block(&self, x: u8, y: u8, z: u8) -> &Block;
-    fn get_block_mut(&mut self, x: u8, y: u8, z: u8) -> &mut Block;
-    fn set_block(&mut self, x: u8, y: u8, z: u8, block: Block);
-}
 
-pub struct Chunk16 {
-    pub location: cgmath::Vector3<i32>,
-    blocks: [Block; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE],
-}
-
-#[derive(Debug)]
-struct aabb {
-    min: cgmath::Point3<f32>,
-    max: cgmath::Point3<f32>,
-}
-
-impl aabb {
-    fn intersect_ray(
-        &self,
-        d0: cgmath::Point3<f32>,
-        dir: cgmath::Vector3<f32>,
-    ) -> Option<[f32; 2]> {
-        let t1 = (self.min - d0).div_element_wise(dir);
-        let t2 = (self.max - d0).div_element_wise(dir);
-        let t_min = t1.zip(t2, f32::min);
-        let t_max = t1.zip(t2, f32::max);
-
-        let mut hit_near = t_min.x;
-        let mut hit_far = t_max.x;
-
-        if hit_near > t_max.y || t_min.y > hit_far {
-            return None;
-        }
-
-        if t_min.y > hit_near {
-            hit_near = t_min.y;
-        }
-        if t_max.y < hit_far {
-            hit_far = t_max.y;
-        }
-
-        if (hit_near > t_max.z) || (t_min.z > hit_far) {
-            return None;
-        }
-
-        if t_min.z > hit_near {
-            hit_near = t_min.z;
-        }
-        if t_max.z < hit_far {
-            hit_far = t_max.z;
-        }
-        Some([hit_near, hit_far])
-    }
-}
-
-impl Chunk16 {
-    pub fn new(x: i32, y: i32, z: i32) -> Self {
-        Self {
-            location: cgmath::Vector3::new(x, y, z),
-            ..Default::default()
-        }
-    }
-
-    // get all blocks that intersect with a ray
-    pub fn collision_check(&mut self, d0: cgmath::Point3<f32>, dir: cgmath::Vector3<f32>) {
-        let mut candidates = Vec::new();
-        let location = self.location;
-        for block in self.blocks.iter_mut() {
-            if block.is_active {
-                let aabb = block.block_to_aabb(location);
-                if let Some(hit) = aabb.intersect_ray(d0, dir) {
-                    let position = d0 + dir * hit[0];
-                    candidates.push((block, hit));
-                } else {
-                    block.is_selected = false;
-                }
-
-            }
-        }
-        candidates.sort_by(|a, b| a.1[0].partial_cmp(&b.1[0]).unwrap());
-        if let Some(c) = candidates.first_mut() {
-            info!("Selected block: {:?}", c.0.chunk_location);
-            c.0.is_selected = true;
-        };
-        for c in candidates.iter_mut().skip(1) {
-            c.0.is_selected = false;
-        }
-    }
-}
-
-impl Default for Chunk16 {
-    fn default() -> Self {
-        let mut s = Self {
-            blocks: [Block::new(); CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE],
-            location: cgmath::Vector3::new(0, 0, 0),
-        };
-        // set all the positions for blocks
-        for i in 0..CHUNK_SIZE as u8 {
-            for j in 0..CHUNK_SIZE as u8 {
-                for k in 0..CHUNK_SIZE as u8 {
-                    s.set_block(
-                        i,
-                        j,
-                        k,
-                        Block {
-                            is_active: true,
-                            is_selected: false,
-                            t: BlockType::Stone,
-                            chunk_location: cgmath::Vector3::new(i, j, k),
-                        },
-                    );
-                }
-            }
-        }
-        s
-    }
-}
-const BLOCK_SIZE: f32 = 2.0;
-
-impl Render for Chunk16 {
-    fn render(&self) -> Vec<Instance> {
-        let chunk_offset = self.location.cast::<f32>().unwrap() * BLOCK_SIZE * CHUNK_SIZE as f32;
-        self.blocks
-            .iter()
-            .filter(|block| block.is_active)
-            .map(|block| {
-                let position = block.chunk_location.cast::<f32>().unwrap() * BLOCK_SIZE + chunk_offset;
-                Instance {
-                    position,
-                    block_type: block.t,
-                    is_selected: block.is_selected,
-                    ..Default::default()
-                }
-            })
-            .collect()
-    }
-}
-
-impl Chunk16 {
-    fn xyz_to_index(x: u8, y: u8, z: u8) -> usize {
-        let (x, y, z) = (x as usize, y as usize, z as usize);
-        x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE
-    }
-}
-
-impl Chunk for Chunk16 {
-    fn get_block(&self, x: u8, y: u8, z: u8) -> &Block {
-        let index = Self::xyz_to_index(x, y, z);
-        &self.blocks[index]
-    }
-
-    fn get_block_mut(&mut self, x: u8, y: u8, z: u8) -> &mut Block {
-        let index = Self::xyz_to_index(x, y, z);
-        &mut self.blocks[index]
-    }
-
-    fn set_block(&mut self, x: u8, y: u8, z: u8, block: Block) {
-        let index = Self::xyz_to_index(x, y, z);
-        self.blocks[index] = block;
-    }
-}

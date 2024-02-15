@@ -11,6 +11,8 @@ use winit::{
     keyboard::{Key, KeyCode, NamedKey, PhysicalKey},
 };
 
+use crate::aabb::Aabb;
+
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     1.0, 0.0, 0.0, 0.0,
@@ -26,6 +28,8 @@ pub struct Camera {
     pub position: Point3<f32>,
     yaw: Rad<f32>,
     pitch: Rad<f32>,
+    collider: Vector3<f32>,
+    pub velocity: Vector3<f32>,
 }
 
 impl Camera {
@@ -38,6 +42,8 @@ impl Camera {
             position: position.into(),
             yaw: yaw.into(),
             pitch: pitch.into(),
+            collider: Vector3::new(0.8, 2.0, 0.8),
+            velocity: Vector3::new(0.0, 0.0, 0.0),
         }
     }
 
@@ -76,6 +82,16 @@ impl Projection {
 
     pub fn calc_matrix(&self) -> Matrix4<f32> {
         OPENGL_TO_WGPU_MATRIX * perspective(self.fovy, self.aspect, self.znear, self.zfar)
+    }
+}
+
+impl Aabb for Camera {
+    fn min(&self) -> Point3<f32> {
+        self.position - (self.collider / 2.0)
+    }
+
+    fn max(&self) -> Point3<f32> {
+        self.position + (self.collider / 2.0)
     }
 }
 

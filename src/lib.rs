@@ -26,9 +26,9 @@ use winit::{
 };
 
 use crate::{
-    block::{Chunk16, Render},
     model::Vertex,
-    resources::load_texture,
+    chunk::Chunk16,
+    resources::load_texture, block::Render,
 };
 
 mod block;
@@ -38,11 +38,14 @@ mod model;
 mod resources;
 mod texture;
 mod voxel;
+mod aabb;
+mod chunk;
 
 const CHUNK_RENDER_DISTANCE: i32 = 1;
+const GRAVITY: f32 = 9.8;
 
 pub struct Instance {
-    position: cgmath::Vector3<f32>,
+    position: cgmath::Point3<f32>,
     rotation: cgmath::Quaternion<f32>,
     block_type: BlockType,
     is_selected: bool,
@@ -51,7 +54,7 @@ pub struct Instance {
 impl Default for Instance {
     fn default() -> Self {
         Self {
-            position: cgmath::Vector3::zero(),
+            position: cgmath::Point3::new(0.0, 0.0, 0.0),
             rotation: cgmath::Quaternion::from_axis_angle(
                 cgmath::Vector3::unit_z(),
                 cgmath::Deg(0.0),
@@ -88,7 +91,7 @@ impl Instance {
             | if self.is_selected { 1 << 8 } else { 0 };
 
         InstanceRaw {
-            model: (cgmath::Matrix4::from_translation(self.position)
+            model: (cgmath::Matrix4::from_translation(self.position.to_vec())
                 * cgmath::Matrix4::from(self.rotation))
             .into(),
             normal: cgmath::Matrix3::from(self.rotation).into(),
@@ -401,19 +404,19 @@ impl State {
             )
         };
 
-        let chunks = vec![Chunk16::default()];
+        let chunks = vec![];
 
         window.set_cursor_visible(false);
         window
             .set_cursor_grab(winit::window::CursorGrabMode::Confined)
             .unwrap();
 
-        const total_chunks: i32 = (CHUNK_RENDER_DISTANCE * 2 + 1) * (CHUNK_RENDER_DISTANCE * 2 + 1);
-        const expected_instance_count: i32 = 16 * 16 * 16 * total_chunks;
+        const TOTAL_CHUNKS: i32 = (CHUNK_RENDER_DISTANCE * 2 + 1) * (CHUNK_RENDER_DISTANCE * 2 + 1);
+        const EXPECTED_INSTANCE_COUNT: i32 = 16 * 16 * 16 * TOTAL_CHUNKS;
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
             contents: bytemuck::cast_slice(
-                &[InstanceRaw::default(); expected_instance_count as usize],
+                &[InstanceRaw::default(); EXPECTED_INSTANCE_COUNT as usize],
             ),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
@@ -457,7 +460,6 @@ impl State {
 
     // impl State
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-        info!("Resizing to {:?}", new_size);
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
             self.config.width = new_size.width;
@@ -514,11 +516,19 @@ impl State {
             (camera_pos.z / (32.0)).floor() as i32,
         );
 
+        // apply gravity, then check collider min > 0, if < 0, set to 0
+        self.camera.velocity.y -= GRAVITY * dt.as_secs_f32();
+        self.camera.position.y += self.camera.velocity.y * dt.as_secs_f32();
+        if self.camera.position.y < 0.0 {
+            self.camera.position.y = 0.0;
+            self.camera.velocity.y = 0.0;
+        }
+
         let mut loaded = HashMap::<(i32, i32), bool>::new();
         let mut dirty = false;
         // unload oob chunks
         self.chunks.retain(|c| {
-            let chunk_pos = c.location;
+            let chunk_pos = c.origin;
             let distance = (
                 (chunk_pos.x - camera_chunk.0).abs(),
                 (chunk_pos.z - camera_chunk.1).abs(),
@@ -538,11 +548,12 @@ impl State {
                 if loaded.contains_key(&chunk_pos) {
                     continue;
                 }
-                let chunk = Chunk16::new(chunk_pos.0, 0, chunk_pos.1);
+                let chunk = Chunk16::new(chunk_pos.0, -1, chunk_pos.1);
                 self.chunks.push(chunk);
             }
         }
 
+        // if chunk list has updated, update the instance data buffer
         if dirty {
             self.instances = self
                 .chunks
@@ -550,7 +561,6 @@ impl State {
                 .flat_map(|c| c.render())
                 .collect::<Vec<_>>();
 
-            info!("{} instances", self.instances.len());
             let instance_data = self
                 .instances
                 .iter()
