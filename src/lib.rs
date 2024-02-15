@@ -42,7 +42,7 @@ mod aabb;
 mod chunk;
 
 const CHUNK_RENDER_DISTANCE: i32 = 1;
-const GRAVITY: f32 = 9.8;
+pub const GRAVITY: f32 = 9.8;
 
 pub struct Instance {
     position: cgmath::Point3<f32>,
@@ -318,7 +318,7 @@ impl State {
         let camera = camera::Camera::new((15.0, 32.0, 15.0), cgmath::Deg(-90.), cgmath::Deg(-20.));
         let projection =
             camera::Projection::new(size.width, size.height, cgmath::Deg(67.0), 0.1, 100.);
-        let camera_controller = CameraController::new(4.0, 1.0);
+        let camera_controller = CameraController::new(4.0, 1.0, 20.0);
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera, &projection);
 
@@ -516,13 +516,7 @@ impl State {
             (camera_pos.z / (32.0)).floor() as i32,
         );
 
-        // apply gravity, then check collider min > 0, if < 0, set to 0
-        self.camera.velocity.y -= GRAVITY * dt.as_secs_f32();
-        self.camera.position.y += self.camera.velocity.y * dt.as_secs_f32();
-        if self.camera.position.y < 0.0 {
-            self.camera.position.y = 0.0;
-            self.camera.velocity.y = 0.0;
-        }
+
 
         let mut loaded = HashMap::<(i32, i32), bool>::new();
         let mut dirty = false;

@@ -11,6 +11,7 @@ use winit::{
     keyboard::{Key, KeyCode, NamedKey, PhysicalKey},
 };
 
+use crate::GRAVITY;
 use crate::aabb::Aabb;
 
 #[rustfmt::skip]
@@ -108,10 +109,11 @@ pub struct CameraController {
     scroll: f32,
     speed: f32,
     sensitivity: f32,
+    jump_velocity: f32,
 }
 
 impl CameraController {
-    pub fn new(speed: f32, sensitivity: f32) -> Self {
+    pub fn new(speed: f32, sensitivity: f32, jump_velocity: f32) -> Self {
         Self {
             amount_left: 0.0,
             amount_right: 0.0,
@@ -124,6 +126,7 @@ impl CameraController {
             scroll: 0.0,
             speed,
             sensitivity,
+            jump_velocity,
         }
     }
 
@@ -202,7 +205,7 @@ impl CameraController {
 
         // Move up/down. Since we don't use roll, we can just
         // modify the y coordinate directly.
-        camera.position.y += (self.amount_up - self.amount_down) * self.speed * dt;
+        camera.velocity.y += self.amount_up * self.jump_velocity * dt;
 
         // Rotate
         camera.yaw += Rad(self.rotate_horizontal) * self.sensitivity * dt;
@@ -219,6 +222,15 @@ impl CameraController {
             camera.pitch = -Rad(SAFE_FRAC_PI_2);
         } else if camera.pitch > Rad(SAFE_FRAC_PI_2) {
             camera.pitch = Rad(SAFE_FRAC_PI_2);
+        }
+
+        // apply gravity, then check collider min > 0, if < 0, set to 0
+        camera.velocity.y -= GRAVITY * dt;
+        camera.position.y += camera.velocity.y * dt;
+
+        if camera.min().y < 0.0 {
+            camera.position.y = 0.0 + camera.collider.y / 2.0;
+            camera.velocity.y = 0.0;
         }
     }
 }
