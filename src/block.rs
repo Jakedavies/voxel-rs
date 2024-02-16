@@ -16,13 +16,13 @@ pub enum BlockType {
     Ore,
 }
 
-impl BlockType {
-    pub fn to_chunk_data(self) -> u32 {
+impl Into<u16> for BlockType {
+    fn into(self) -> u16 {
         match self {
             BlockType::Stone => 0,
-            BlockType::Dirt => 1,
-            BlockType::Grass => 2,
-            BlockType::Ore => 16,
+            BlockType::Dirt => 1 << 8 | 1,
+            BlockType::Grass => 3 << 8 | 2, // grass uses 3 for the top and 2 for the other sides
+            BlockType::Ore => 16 << 8 | 16,
             _ => 255,
         }
     }
@@ -39,7 +39,7 @@ pub struct Block {
 impl Block {
     pub fn new(position: Point3<u8>) -> Self {
         Self {
-            is_active: true,
+            is_active: false,
             is_selected: false,
             t: BlockType::Stone,
             chunk_space_origin: position,

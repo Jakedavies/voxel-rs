@@ -13,6 +13,7 @@ use cgmath::prelude::*;
 use light::LightUniform;
 use log::{debug, info};
 use model::{DrawLight, DrawModel, ModelVertex};
+use noise::{Fbm, Simplex};
 use notify::{event::ModifyKind, RecommendedWatcher, RecursiveMode, Watcher};
 use wgpu::util::DeviceExt;
 
@@ -86,9 +87,10 @@ impl Default for InstanceRaw {
 impl Instance {
     fn to_raw(&self) -> InstanceRaw {
         let block_data_0 = 0u32;
+        let block_type: u16 = self.block_type.into();
         let block_data_0 = block_data_0
-            | self.block_type.to_chunk_data()
-            | if self.is_selected { 1 << 8 } else { 0 };
+            | block_type as u32
+            | if self.is_selected { 1 << 16 } else { 0 };
 
         InstanceRaw {
             model: (cgmath::Matrix4::from_translation(self.position.to_vec())
@@ -214,6 +216,7 @@ struct State {
     chunks: Vec<Chunk16>,
     file_watcher: FileWatcher,
     mouse_pressed: bool,
+    noise: Fbm<Simplex>
 }
 
 #[derive(Clone)]
@@ -318,7 +321,7 @@ impl State {
         let camera = camera::Camera::new((15.0, 32.0, 15.0), cgmath::Deg(-90.), cgmath::Deg(-20.));
         let projection =
             camera::Projection::new(size.width, size.height, cgmath::Deg(67.0), 0.1, 100.);
-        let camera_controller = CameraController::new(4.0, 1.0, 20.0);
+        let camera_controller = CameraController::new(10.0, 1.0, 20.0);
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera, &projection);
 
@@ -422,6 +425,7 @@ impl State {
         });
 
         let obj_model = voxel::load_block(&device, &queue).unwrap();
+        let noise = Fbm::<Simplex>::new(0);
 
         Self {
             window,
@@ -451,6 +455,7 @@ impl State {
             diffuse_bind_group,
             file_watcher,
             mouse_pressed: false,
+            noise,
         }
     }
 
@@ -542,7 +547,7 @@ impl State {
                 if loaded.contains_key(&chunk_pos) {
                     continue;
                 }
-                let chunk = Chunk16::new(chunk_pos.0, -1, chunk_pos.1);
+                let chunk = Chunk16::new(chunk_pos.0, -1, chunk_pos.1).generate(&self.noise);
                 self.chunks.push(chunk);
             }
         }

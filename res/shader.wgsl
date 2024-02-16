@@ -47,7 +47,6 @@ fn vs_main(
 ) -> VertexOutput {
 
     let model_matrix = mat4x4<f32>(
-
         instance.model_matrix_0,
         instance.model_matrix_1,
         instance.model_matrix_2,
@@ -94,7 +93,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         uv = in.position.xy;
     }
 
-    let selected = in.block_data_0 & 0x0000FF00u;
+    let selected = in.block_data_0 & 0x00FF0000u;
 
     // dot normal and position to get a uv coordinate
     //let uv = vec2<f32>(dot(in.normal.zxy, in.position), dot(in.normal.yzx, in.position));
@@ -102,9 +101,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let corrected_position = 1.0 - (uv + vec2<f32>(1.0, 1.0)) / 2.0;
     //let object_color: vec4<f32> = vec4<f32>(corrected_position.x, corrected_position.y,  0.0, 1.0);
 
-    let texture_index = in.block_data_0 & 0x000000FFu;
+    let texture_index_top = in.block_data_0 & 0x000000FFu;
+    let texture_index_sides = (in.block_data_0 & 0x0000FF00u) >> 8u;
+    // bitshift sides 
     
-    let texture_position = vec2<f32>(f32(texture_index % 16u), f32(texture_index / 16u));
+    // if we are facing up, use the top texture, else use sides
+    var texture_position: vec2<f32>;
+    if faceNormal.z > 0.0 {
+        texture_position = vec2<f32>(f32(texture_index_top % 16u), f32(texture_index_top / 16u));
+    } else {
+        texture_position = vec2<f32>(f32(texture_index_sides % 16u), f32(texture_index_sides / 16u));
+    }
     let texture_offset = 1.0 / 16.0;
     let total_offset = texture_position * texture_offset;
     let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, vec2<f32>(corrected_position.x / 16.0 + total_offset.x, corrected_position.y / 16.0 + total_offset.y));

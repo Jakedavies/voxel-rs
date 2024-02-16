@@ -1,10 +1,14 @@
 use crate::{
-    block::{Block, Render, BLOCK_SIZE},
-    Instance, aabb::Aabb,
+    aabb::Aabb,
+    block::{Block, BlockType, Render, BLOCK_SIZE},
+    Instance,
 };
-use cgmath::{prelude::*, Vector3, Point3};
+use cgmath::{prelude::*, Point3, Vector3};
+use log::info;
+use noise::NoiseFn;
 
 const CHUNK_SIZE: usize = 16;
+const NOISE_SCALE: f64 = 0.01;
 
 pub trait Chunk {
     fn get_block(&self, x: u8, y: u8, z: u8) -> &Block;
@@ -21,8 +25,57 @@ impl Chunk16 {
     pub fn new(x: i32, y: i32, z: i32) -> Self {
         Self {
             origin: cgmath::Point3::new(x, y, z),
-            ..Default::default()
+            blocks: {
+                let mut blocks =
+                    [Block::new(Point3::new(0, 0, 0)); CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
+                for x in 0..CHUNK_SIZE {
+                    for y in 0..CHUNK_SIZE {
+                        for z in 0..CHUNK_SIZE {
+                            let index = Self::xyz_to_index(x as u8, y as u8, z as u8);
+                            blocks[index] = Block::new(Point3::new(x as u8, y as u8, z as u8));
+                        }
+                    }
+                }
+                blocks
+            },
         }
+    }
+
+    pub fn generate(mut self, noise: &impl NoiseFn<f64, 2>) -> Chunk16 {
+        // for min/max on this chunk, generate a 2d noise map
+        for x in self.origin.x * CHUNK_SIZE as i32..(self.origin.x + 1) * CHUNK_SIZE as i32 {
+            for z in self.origin.z * CHUNK_SIZE as i32..(self.origin.z + 1) * CHUNK_SIZE as i32 {
+
+                // we are rendering chunk on the -1 y so we shift down by 1
+                let height = noise.get([x as f64 * NOISE_SCALE, z as f64 * NOISE_SCALE]) * 16. + 8.0 - 16.0;
+                info!("height for {} {}: {}", x, z, height);
+
+                for y in self.origin.y * CHUNK_SIZE as i32..(self.origin.y + 1) * CHUNK_SIZE as i32
+                {
+                    let index = Self::xyz_to_index(
+                        (x - self.origin.x * CHUNK_SIZE as i32) as u8,
+                        (y - self.origin.y * CHUNK_SIZE as i32) as u8,
+                        (z - self.origin.z * CHUNK_SIZE as i32) as u8,
+                    );
+                    info!("y: {}", y);
+
+                    self.blocks[index].is_active = false;
+
+                    // if y is at the height, make it grass
+                    if (y as f64 - height) < 1.0 && (y as f64 - height) > 0.0 {
+                        self.blocks[index].t = BlockType::Grass;
+                        self.blocks[index].is_active = true;
+                    } else if (y as f64) < height && (y as f64) > height - 2. {
+                        self.blocks[index].t = BlockType::Dirt;
+                        self.blocks[index].is_active = true;
+                    } else if (y as f64) < height {
+                        self.blocks[index].t = BlockType::Stone;
+                        self.blocks[index].is_active = true;
+                    }
+                }
+            }
+        }
+        self
     }
 
     // get all blocks that intersect with a ray
@@ -49,37 +102,17 @@ impl Chunk16 {
     }
 }
 
-impl Default for Chunk16 {
-    fn default() -> Self {
-        let mut s = Self {
-            blocks: [Block::new(Point3::new(0, 0, 0)); CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE],
-            origin: cgmath::Point3::new(0, 0, 0),
-        };
-        // set all the positions for blocks
-        for i in 0..CHUNK_SIZE as u8 {
-            for j in 0..CHUNK_SIZE as u8 {
-                for k in 0..CHUNK_SIZE as u8 {
-                    s.set_block(i, j, k, Block::new(Point3::new(i, j, k)));
-                }
-            }
-        }
-        s
-    }
-}
-
 impl Render for Chunk16 {
     fn render(&self) -> Vec<Instance> {
         let chunk_offset = self.origin.cast::<f32>().unwrap() * BLOCK_SIZE * CHUNK_SIZE as f32;
         self.blocks
             .iter()
             .filter(|block| block.is_active)
-            .map(|block| {
-                Instance {
-                    position: block.origin() + chunk_offset.to_vec(),
-                    block_type: block.t,
-                    is_selected: block.is_selected,
-                    ..Default::default()
-                }
+            .map(|block| Instance {
+                position: block.origin() + chunk_offset.to_vec(),
+                block_type: block.t,
+                is_selected: block.is_selected,
+                ..Default::default()
             })
             .collect()
     }
