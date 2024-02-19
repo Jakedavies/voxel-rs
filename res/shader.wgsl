@@ -107,10 +107,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     
     // if we are facing up, use the top texture, else use sides
     var texture_position: vec2<f32>;
-    if faceNormal.z > 0.0 {
-        texture_position = vec2<f32>(f32(texture_index_top % 16u), f32(texture_index_top / 16u));
-    } else {
+    if faceNormal.y > 0.0 {
         texture_position = vec2<f32>(f32(texture_index_sides % 16u), f32(texture_index_sides / 16u));
+    } else {
+        texture_position = vec2<f32>(f32(texture_index_top % 16u), f32(texture_index_top / 16u));
     }
     let texture_offset = 1.0 / 16.0;
     let total_offset = texture_position * texture_offset;

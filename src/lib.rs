@@ -26,21 +26,17 @@ use winit::{
     window::WindowBuilder,
 };
 
-use crate::{
-    model::Vertex,
-    chunk::Chunk16,
-    resources::load_texture, block::Render,
-};
+use crate::{block::Render, chunk::Chunk16, model::Vertex, resources::load_texture};
 
+mod aabb;
 mod block;
 mod camera;
+mod chunk;
 mod light;
 mod model;
 mod resources;
 mod texture;
 mod voxel;
-mod aabb;
-mod chunk;
 
 const CHUNK_RENDER_DISTANCE: i32 = 1;
 pub const GRAVITY: f32 = 9.8;
@@ -88,9 +84,8 @@ impl Instance {
     fn to_raw(&self) -> InstanceRaw {
         let block_data_0 = 0u32;
         let block_type: u16 = self.block_type.into();
-        let block_data_0 = block_data_0
-            | block_type as u32
-            | if self.is_selected { 1 << 16 } else { 0 };
+        let block_data_0 =
+            block_data_0 | block_type as u32 | if self.is_selected { 1 << 16 } else { 0 };
 
         InstanceRaw {
             model: (cgmath::Matrix4::from_translation(self.position.to_vec())
@@ -216,7 +211,7 @@ struct State {
     chunks: Vec<Chunk16>,
     file_watcher: FileWatcher,
     mouse_pressed: bool,
-    noise: Fbm<Simplex>
+    noise: Fbm<Simplex>,
 }
 
 #[derive(Clone)]
@@ -409,11 +404,7 @@ impl State {
 
         let chunks = vec![];
 
-        window.set_cursor_visible(false);
-        window
-            .set_cursor_grab(winit::window::CursorGrabMode::Confined)
-            .unwrap();
-
+        //window.set_cursor_visible(false);
         const TOTAL_CHUNKS: i32 = (CHUNK_RENDER_DISTANCE * 2 + 1) * (CHUNK_RENDER_DISTANCE * 2 + 1);
         const EXPECTED_INSTANCE_COUNT: i32 = 16 * 16 * 16 * TOTAL_CHUNKS;
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -521,8 +512,6 @@ impl State {
             (camera_pos.z / (32.0)).floor() as i32,
         );
 
-
-
         let mut loaded = HashMap::<(i32, i32), bool>::new();
         let mut dirty = false;
         // unload oob chunks
@@ -585,12 +574,14 @@ impl State {
             bytemuck::cast_slice(&[self.light_uniform]),
         );
         // Force cursor back to middle
-        self.window
-            .set_cursor_position(winit::dpi::PhysicalPosition::new(
-                self.size.width as f64 / 2.0,
-                self.size.height as f64 / 2.0,
-            ))
-            .unwrap();
+        if self.window.has_focus() {
+            self.window
+                .set_cursor_position(winit::dpi::PhysicalPosition::new(
+                    self.size.width as f64 / 2.0,
+                    self.size.height as f64 / 2.0,
+                ))
+                .unwrap();
+        }
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
