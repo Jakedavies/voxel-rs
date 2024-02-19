@@ -7,7 +7,7 @@ Initial rendering code based on the fantastic [Learn WGPU tutorial series](https
 
 ### Status as of Feb 19 2024
 
-[[progress/2024-02-19_21-40.png|Feb 19, 2024 Progress]]
+![Feb 19, 2024 Progress](/progress/2024-02-19_21-40.png)
 
 - Voxel based rendering works.
 - Mapping of textures based on block type in shader using texture atlas.
