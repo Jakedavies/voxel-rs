@@ -1,4 +1,4 @@
-use cgmath::{Vector3, ElementWise, Point3};
+use cgmath::{ElementWise, Point3};
 
 pub trait Aabb {
     fn min(&self) -> Point3<f32>;

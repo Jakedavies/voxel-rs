@@ -4,7 +4,7 @@ use std::{
     path::Path,
     sync::{Arc, Mutex},
     thread,
-    time::Instant,
+    time::Instant, ops::Deref,
 };
 
 use block::BlockType;
@@ -212,6 +212,8 @@ struct State {
     file_watcher: FileWatcher,
     mouse_pressed: bool,
     noise: Fbm<Simplex>,
+    wireframe: Wireframe,
+    render_pipeline_dirty: bool,
 }
 
 #[derive(Clone)]
@@ -373,6 +375,7 @@ impl State {
                 Some(texture::Texture::DEPTH_FORMAT),
                 &[model::ModelVertex::desc()],
                 shader,
+                &Wireframe::Off
             )
         };
 
@@ -387,6 +390,7 @@ impl State {
                 push_constant_ranges: &[],
             });
 
+        let wireframe = Wireframe::Off;
         let render_pipeline = {
             let shader = wgpu::ShaderModuleDescriptor {
                 label: Some("Normal Shader"),
@@ -399,6 +403,7 @@ impl State {
                 Some(texture::Texture::DEPTH_FORMAT),
                 &[model::ModelVertex::desc(), InstanceRaw::desc()],
                 shader,
+                &wireframe
             )
         };
 
@@ -447,6 +452,8 @@ impl State {
             file_watcher,
             mouse_pressed: false,
             noise,
+            wireframe,
+            render_pipeline_dirty: false,
         }
     }
 
@@ -475,10 +482,21 @@ impl State {
                     KeyEvent {
                         physical_key: key,
                         state,
+                        repeat,
                         ..
                     },
                 ..
-            } => self.camera_controller.process_keyboard(*key, *state),
+            } => {
+                if !(self.camera_controller.process_keyboard(*key, *state)) {
+                    if *state == ElementState::Pressed && *key == PhysicalKey::Code(KeyCode::KeyP) && repeat == &false {
+                            self.wireframe.toggle();
+                            self.render_pipeline_dirty = true;
+                            return true
+                    }
+                    return false
+                }
+                false
+            },
             WindowEvent::MouseWheel { delta, .. } => {
                 self.camera_controller.process_scroll(delta);
                 true
@@ -592,7 +610,6 @@ impl State {
         // if shader has updated, recreate render Pipeline
         if let Some(path) = updated {
             if path.ends_with("shader.wgsl") {
-                info!("Reloading shader");
                 // reload the shader
                 let shader_source = std::fs::read_to_string(path).unwrap();
                 let shader = wgpu::ShaderModuleDescriptor {
@@ -606,9 +623,26 @@ impl State {
                     Some(texture::Texture::DEPTH_FORMAT),
                     &[model::ModelVertex::desc(), InstanceRaw::desc()],
                     shader,
+                    &self.wireframe
                 );
             }
         }
+
+        if self.render_pipeline_dirty {
+            self.render_pipeline = create_render_pipeline(
+                &self.device,
+                &self.render_pipeline_layout,
+                self.config.format,
+                Some(texture::Texture::DEPTH_FORMAT),
+                &[model::ModelVertex::desc(), InstanceRaw::desc()],
+                wgpu::ShaderModuleDescriptor {
+                    label: Some("Normal Shader"),
+                    source: wgpu::ShaderSource::Wgsl(include_str!("../res/shader.wgsl").into()),
+                },
+                &self.wireframe
+            );
+        }
+        self.render_pipeline_dirty = false;
 
         let view = output
             .texture
@@ -670,6 +704,20 @@ impl State {
     }
 }
 
+enum Wireframe {
+    On,
+    Off,
+}
+
+impl Wireframe {
+    fn toggle(&mut self) {
+        match self {
+            Wireframe::On => *self = Wireframe::Off,
+            Wireframe::Off => *self = Wireframe::On,
+        }
+    }
+}
+
 fn create_render_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
@@ -677,6 +725,7 @@ fn create_render_pipeline(
     depth_format: Option<wgpu::TextureFormat>,
     vertex_layouts: &[wgpu::VertexBufferLayout],
     shader: wgpu::ShaderModuleDescriptor,
+    wireframes: &Wireframe,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(shader);
 
@@ -706,7 +755,10 @@ fn create_render_pipeline(
             front_face: wgpu::FrontFace::Ccw,
             cull_mode: Some(wgpu::Face::Back),
             // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
-            polygon_mode: wgpu::PolygonMode::Fill,
+            polygon_mode: match wireframes {
+                Wireframe::On => wgpu::PolygonMode::Line,
+                Wireframe::Off => wgpu::PolygonMode::Fill,
+            },
             // Requires Features::DEPTH_CLIP_CONTROL
             unclipped_depth: false,
             // Requires Features::CONSERVATIVE_RASTERIZATION
