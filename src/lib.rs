@@ -315,7 +315,7 @@ impl State {
 
         let (texture_bind_group_layout, diffuse_bind_group) = texture::setup(&device, &queue).await;
 
-        let camera = camera::Camera::new((15.0, 32.0, 15.0), cgmath::Deg(-90.), cgmath::Deg(-20.));
+        let camera = camera::Camera::new((0.0, 32.0, 0.0), cgmath::Deg(-90.), cgmath::Deg(0.));
         let projection =
             camera::Projection::new(size.width, size.height, cgmath::Deg(67.0), 0.1, 100.);
         let camera_controller = CameraController::new(10.0, 1.0, 20.0);
@@ -559,13 +559,17 @@ impl State {
             }
         }
 
-        // if chunk list has updated, update the instance data buffer
+        let frustrum = self.camera.frustrum(&self.projection);
+        // if a chunk has updated, update the instance data buffer
         if dirty {
             self.instances = self
                 .chunks
                 .iter()
-                .flat_map(|c| c.render())
+                .flat_map(|c| c.culled_render(&frustrum))
+                //.flat_map(|c| c.render())
                 .collect::<Vec<_>>();
+
+            log::info!("Instances: {}", self.instances.len());
 
             let instance_data = self
                 .instances

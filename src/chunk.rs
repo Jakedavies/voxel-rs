@@ -1,7 +1,7 @@
 use crate::{
-    aabb::Aabb,
+    aabb::{Aabb, SimpleAabb},
     block::{Block, BlockType, Render, BLOCK_SIZE},
-    Instance,
+    Instance, camera::Frustrum,
 };
 use cgmath::{prelude::*, Point3, Vector3};
 use log::info;
@@ -118,10 +118,32 @@ impl Render for Chunk16 {
     }
 }
 
+
 impl Chunk16 {
     fn xyz_to_index(x: u8, y: u8, z: u8) -> usize {
         let (x, y, z) = (x as usize, y as usize, z as usize);
         x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE
+    }
+
+    pub fn culled_render(&self, frustum: &Frustrum) -> Vec<Instance> {
+        let chunk_offset = self.origin.cast::<f32>().unwrap() * BLOCK_SIZE * CHUNK_SIZE as f32;
+        self.blocks
+            .iter()
+            .filter(|block| block.is_active)
+            .filter(|block| {
+                let aabb = SimpleAabb::new(
+                    block.min() + chunk_offset.to_vec(),
+                    block.max() + chunk_offset.to_vec(),
+                );
+                frustum.contains(&aabb)
+            })
+            .map(|block| Instance {
+                position: block.origin() + chunk_offset.to_vec(),
+                block_type: block.t,
+                is_selected: block.is_selected,
+                ..Default::default()
+            })
+            .collect()
     }
 }
 

@@ -41,3 +41,23 @@ pub trait Aabb {
         Some([hit_near, hit_far])
     }
 }
+
+pub struct SimpleAabb {
+    min: Point3<f32>,
+    max: Point3<f32>,
+}
+
+impl SimpleAabb {
+    pub fn new(min: Point3<f32>, max: Point3<f32>) -> Self {
+        Self { min, max }
+    }
+}
+
+impl Aabb for SimpleAabb {
+    fn min(&self) -> Point3<f32> {
+        self.min
+    }
+    fn max(&self) -> Point3<f32> {
+        self.max
+    }
+}
