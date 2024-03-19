@@ -1,5 +1,6 @@
 use cgmath::prelude::*;
 use cgmath::*;
+use cgmath::*;
 use log::info;
 use std::{f32::consts::FRAC_PI_2, time::Duration};
 use winit::dpi::PhysicalPosition;
@@ -10,7 +11,6 @@ use winit::{
     event::*,
     keyboard::{Key, KeyCode, NamedKey, PhysicalKey},
 };
-use cgmath::*;
 
 use crate::aabb::Aabb;
 use crate::GRAVITY;
@@ -39,6 +39,22 @@ pub struct Plane {
     pub distance: f32,
 }
 
+impl Plane {
+    pub fn new(normal: Vector3<f32>, point: Point3<f32>) -> Self {
+        Self {
+            normal,
+            distance: -normal.dot(point.to_vec()),
+        }
+    }
+
+    pub fn from_normal_and_point(normal: Vector3<f32>, point: Point3<f32>) -> Self {
+        Self {
+            normal,
+            distance: -normal.dot(point.to_vec()),
+        }
+    }
+}
+
 pub struct Frustrum {
     top: Plane,
     bottom: Plane,
@@ -60,14 +76,14 @@ impl Frustrum {
         ];
 
         for plane in &planes {
-            if plane.normal.dot(point.to_vec()) + plane.distance < 0.0 {
+            if plane.normal.dot(point.to_vec()) + plane.distance <= -5.0 {
                 return false;
             }
         }
 
         true
-    } 
-    
+    }
+
     pub fn contains(&self, other: &dyn Aabb) -> bool {
         let points = [
             other.min(),
@@ -117,94 +133,46 @@ impl Camera {
     }
 
     pub fn frustrum(&self, projection: &Projection) -> Frustrum {
-        // get up, forward, right  from yaw/pitch
-        let (yaw_sin, yaw_cos) = self.yaw.0.sin_cos();
-        let (pitch_sin, pitch_cos) = self.pitch.0.sin_cos();
-        let forward = Vector3::new(yaw_cos * pitch_cos, pitch_sin, yaw_sin * pitch_cos).normalize();
-        let up = Vector3::new(yaw_cos * pitch_sin, pitch_cos, yaw_sin * pitch_sin).normalize();
-        let right = forward.cross(up).normalize();
-        println!("forward: {:?}", forward);
-        println!("up: {:?}", up);
-        println!("right: {:?}", right);
+        let matrix = projection.calc_matrix() * self.calc_matrix();
 
-
-        let near_center = self.position + (forward * projection.znear);
-        let far_center = self.position + (forward * projection.zfar);
-
-        println!("far_center: {:?}", far_center);
-
-        let near_height = (projection.znear * (projection.fovy / 2.0).0.tan()) * 2.0;
-        let near_width = near_height * projection.aspect;
-        let far_height = (projection.zfar * (projection.fovy / 2.0).0.tan()) * 2.0;
-        let far_width = far_height * projection.aspect;
-
-        let far_top_left = far_center + up * (far_height * 0.5) - right * (far_width * 0.5);
-        let far_top_right = far_center + up * (far_height * 0.5) + right * (far_width * 0.5);
-        let far_bottom_left = far_center - up * (far_height * 0.5) - right * (far_width * 0.5);
-        let far_bottom_right = far_center - up * (far_height * 0.5) + right * (far_width * 0.5);
-
-        let near_top_left = near_center + up * (near_height * 0.5) - right * (near_width * 0.5);
-        let near_top_right = near_center + up * (near_height * 0.5) + right * (near_width * 0.5);
-        let near_bottom_left = near_center - up * (near_height * 0.5) - right * (near_width * 0.5);
-        let near_bottom_right = near_center - up * (near_height * 0.5) + right * (near_width * 0.5);
-
-        let top_plane_normal = -(near_top_right - near_top_left).cross(far_top_left - near_top_left).normalize();
-        println!("top_plane_normal: {:?}", top_plane_normal);
-        let top_plane_distance = near_top_left.dot(top_plane_normal);
-        let top_plane = Plane {
-            normal: top_plane_normal,
-            distance: top_plane_distance,
+        let plane_right = Plane {
+            normal: Vector3::new(matrix[0][3] - matrix[0][0], matrix[1][3] - matrix[1][0], matrix[2][3] - matrix[2][0]),
+            distance: matrix[3][3] - matrix[3][0],
         };
 
-        let bottom_plane_normal = -(far_bottom_left - near_bottom_left).cross(near_bottom_right - near_bottom_left).normalize();
-        println!("bottom_plane_normal: {:?}", bottom_plane_normal);
-        let bottom_plane_distance = near_bottom_left.dot(bottom_plane_normal);
-        let bottom_plane = Plane {
-            normal: bottom_plane_normal,
-            distance: bottom_plane_distance,
+        let plane_left = Plane {
+            normal: Vector3::new(matrix[0][3] + matrix[0][0], matrix[1][3] + matrix[1][0], matrix[2][3] + matrix[2][0]),
+            distance: matrix[3][3] + matrix[3][0],
+        };
+
+        let plane_bottom = Plane {
+            normal: Vector3::new(matrix[0][3] + matrix[0][1], matrix[1][3] + matrix[1][1], matrix[2][3] + matrix[2][1]),
+            distance: matrix[3][3] + matrix[3][1],
+        };
+
+        let plane_top = Plane {
+            normal: Vector3::new(matrix[0][3] - matrix[0][1], matrix[1][3] - matrix[1][1], matrix[2][3] - matrix[2][1]),
+            distance: matrix[3][3] - matrix[3][1],
+        };
+
+        let plane_near = Plane {
+            normal: Vector3::new(matrix[0][3] + matrix[0][2], matrix[1][3] + matrix[1][2], matrix[2][3] + matrix[2][2]),
+            distance: matrix[3][3] + matrix[3][2],
+        };
+
+        let plane_far = Plane {
+            normal: Vector3::new(matrix[0][3] - matrix[0][2], matrix[1][3] - matrix[1][2], matrix[2][3] - matrix[2][2]),
+            distance: matrix[3][3] - matrix[3][2],
         };
 
 
-        let left_plane_normal = -(near_top_left - near_bottom_left).cross(far_top_left - near_top_left).normalize();
-        println!("left_plane_normal: {:?}", left_plane_normal);
-        let left_plane_distance = near_top_left.dot(left_plane_normal);
-        let left_plane = Plane {
-            normal: left_plane_normal,
-            distance: left_plane_distance,
-        };
-
-        let right_plane_normal = -(far_bottom_right - near_bottom_right).cross(near_top_right - near_bottom_right).normalize();
-        println!("right_plane_normal: {:?}", right_plane_normal);
-        let right_plane_distance = near_bottom_right.dot(right_plane_normal);
-        let right_plane = Plane {
-            normal: right_plane_normal,
-            distance: right_plane_distance,
-        };
-
-        let near_plane_normal = forward;
-        println!("near_plane_normal: {:?}", near_plane_normal);
-        let near_plane_distance = near_center.dot(forward);
-        let near_plane = Plane {
-            normal: near_plane_normal,
-            distance: near_plane_distance,
-        };
-
-        let far_plane_normal = -forward;
-        println!("far_plane_normal: {:?}", far_plane_normal);
-        let far_plane_distance = far_center.dot(forward);
-        let far_plane = Plane {
-            normal: far_plane_normal,
-            distance: far_plane_distance,
-        };
-
-        
         Frustrum {
-            top: top_plane,
-            bottom: bottom_plane,
-            left: left_plane,
-            right: right_plane,
-            near: near_plane,
-            far: far_plane,
+            top: plane_top,
+            bottom: plane_bottom,
+            left: plane_left,
+            right: plane_right,
+            near: plane_near,
+            far: plane_far,
         }
     }
 }
@@ -242,6 +210,10 @@ impl Projection {
     }
 
     pub fn calc_matrix(&self) -> Matrix4<f32> {
+        perspective(self.fovy, self.aspect, self.znear, self.zfar)
+    }
+
+    pub fn calc_matrix_opengl(&self) -> Matrix4<f32> {
         OPENGL_TO_WGPU_MATRIX * perspective(self.fovy, self.aspect, self.znear, self.zfar)
     }
 }
@@ -391,7 +363,12 @@ mod tests {
 
     #[test]
     fn test_camera_frustrum_calculation() {
-        let camera = Camera::new(Point3::new(0.0, 0.0, 0.0), cgmath::Deg(-90.), cgmath::Deg(0.0));
+        // pointing in -z direction
+        let camera = Camera::new(
+            Point3::new(0.0, 0.0, 0.0),
+            cgmath::Deg(-90.),
+            cgmath::Deg(0.0),
+        );
         let projection = Projection::new(800, 600, cgmath::Deg(70.), 0.1, 100.0);
         let frustrum = camera.frustrum(&projection);
 
@@ -406,12 +383,15 @@ mod tests {
 
         assert!(!frustrum.contains_point(&Point3::new(0.0, 100.0, -10.0)));
         assert!(!frustrum.contains_point(&Point3::new(100.0, 0.0, -10.0)));
-
     }
 
     #[test]
     fn test_camera_frustrum_calculation_backwards() {
-        let camera = Camera::new(Point3::new(0.0, 0.0, 0.0), cgmath::Deg(-90.), cgmath::Deg(180.0));
+        let camera = Camera::new(
+            Point3::new(0.0, 0.0, 0.0),
+            cgmath::Deg(-90.),
+            cgmath::Deg(180.0),
+        );
         let projection = Projection::new(800, 600, cgmath::Deg(70.), 0.1, 100.0);
         let frustrum = camera.frustrum(&projection);
 
@@ -426,9 +406,7 @@ mod tests {
 
         assert!(!frustrum.contains_point(&Point3::new(0.0, 100.0, 10.0)));
         assert!(!frustrum.contains_point(&Point3::new(100.0, 0.0, 10.0)));
-
     }
-
 
     #[test]
     fn test_frustrum_contains_point() {
@@ -458,6 +436,5 @@ mod tests {
                 distance: 1.0,
             },
         };
-
     }
 }

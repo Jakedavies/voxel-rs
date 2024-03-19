@@ -7,9 +7,10 @@ use std::{
     time::Instant, ops::Deref,
 };
 
-use block::BlockType;
+use block::{BlockType, BLOCK_SIZE};
 use camera::{Camera, CameraController, Projection};
 use cgmath::prelude::*;
+use chunk::CHUNK_SIZE;
 use light::LightUniform;
 use log::{debug, info};
 use model::{DrawLight, DrawModel, ModelVertex};
@@ -176,7 +177,7 @@ impl CameraUniform {
 
     fn update_view_proj(&mut self, camera: &Camera, projection: &Projection) {
         self.view_position = camera.position.to_homogeneous().into();
-        self.view_proj = (projection.calc_matrix() * camera.calc_matrix()).into();
+        self.view_proj = (projection.calc_matrix_opengl() * camera.calc_matrix()).into();
     }
 }
 
@@ -315,7 +316,7 @@ impl State {
 
         let (texture_bind_group_layout, diffuse_bind_group) = texture::setup(&device, &queue).await;
 
-        let camera = camera::Camera::new((0.0, 32.0, 0.0), cgmath::Deg(-90.), cgmath::Deg(0.));
+        let camera = camera::Camera::new((9.5, 1.0, -11.27), cgmath::Deg(-90.), cgmath::Rad(-0.0));
         let projection =
             camera::Projection::new(size.width, size.height, cgmath::Deg(67.0), 0.1, 100.);
         let camera_controller = CameraController::new(10.0, 1.0, 20.0);
@@ -526,8 +527,8 @@ impl State {
         // update loaded chunks based on camera position
         let camera_pos = self.camera.position;
         let camera_chunk = (
-            (camera_pos.x / (32.0)).floor() as i32,
-            (camera_pos.z / (32.0)).floor() as i32,
+            (camera_pos.x / (CHUNK_SIZE as f32 * BLOCK_SIZE)).floor() as i32,
+            (camera_pos.z / (CHUNK_SIZE as f32 * BLOCK_SIZE)).floor() as i32,
         );
 
         let mut loaded = HashMap::<(i32, i32), bool>::new();

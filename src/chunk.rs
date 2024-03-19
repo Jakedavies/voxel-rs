@@ -7,7 +7,7 @@ use cgmath::{prelude::*, Point3, Vector3};
 use log::info;
 use noise::NoiseFn;
 
-const CHUNK_SIZE: usize = 16;
+pub const CHUNK_SIZE: usize = 16;
 const NOISE_SCALE: f64 = 0.01;
 
 pub trait Chunk {
@@ -135,7 +135,11 @@ impl Chunk16 {
                     block.min() + chunk_offset.to_vec(),
                     block.max() + chunk_offset.to_vec(),
                 );
-                frustum.contains(&aabb)
+                let result = frustum.contains(&aabb);
+                if !result {
+                    info!("culling block: {:?}", block.origin() + chunk_offset.to_vec());
+                }
+                result
             })
             .map(|block| Instance {
                 position: block.origin() + chunk_offset.to_vec(),
