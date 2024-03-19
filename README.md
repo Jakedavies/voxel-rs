@@ -14,6 +14,7 @@ Initial rendering code based on the fantastic [Learn WGPU tutorial series](https
 - Dynamic chunk loading based on camera position
 - Basic procedural chunk generation using open simplex noise and height based block selection.
 - Basic camera controller, with gravity. Arbitrary floor at y = 32.
+- View culling of voxels
 
 ### TODO
 In no particular order, here are some future items to look into.
