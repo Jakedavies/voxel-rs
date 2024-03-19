@@ -1,5 +1,6 @@
 use cgmath::prelude::*;
 use cgmath::*;
+use cgmath::*;
 use log::info;
 use std::{f32::consts::FRAC_PI_2, time::Duration};
 use winit::dpi::PhysicalPosition;
@@ -11,8 +12,8 @@ use winit::{
     keyboard::{Key, KeyCode, NamedKey, PhysicalKey},
 };
 
-use crate::GRAVITY;
 use crate::aabb::Aabb;
+use crate::GRAVITY;
 
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
@@ -31,6 +32,78 @@ pub struct Camera {
     pitch: Rad<f32>,
     collider: Vector3<f32>,
     pub velocity: Vector3<f32>,
+}
+
+pub struct Plane {
+    pub normal: Vector3<f32>,
+    pub distance: f32,
+}
+
+impl Plane {
+    pub fn new(normal: Vector3<f32>, point: Point3<f32>) -> Self {
+        Self {
+            normal,
+            distance: -normal.dot(point.to_vec()),
+        }
+    }
+
+    pub fn from_normal_and_point(normal: Vector3<f32>, point: Point3<f32>) -> Self {
+        Self {
+            normal,
+            distance: -normal.dot(point.to_vec()),
+        }
+    }
+}
+
+pub struct Frustrum {
+    top: Plane,
+    bottom: Plane,
+    left: Plane,
+    right: Plane,
+    near: Plane,
+    far: Plane,
+}
+
+impl Frustrum {
+    fn contains_point(&self, point: &Point3<f32>) -> bool {
+        let planes = [
+            &self.top,
+            &self.bottom,
+            &self.left,
+            &self.right,
+            &self.near,
+            &self.far,
+        ];
+
+        for plane in &planes {
+            if plane.normal.dot(point.to_vec()) + plane.distance <= -5.0 {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    pub fn contains(&self, other: &dyn Aabb) -> bool {
+        let points = [
+            other.min(),
+            Point3::new(other.min().x, other.min().y, other.max().z),
+            Point3::new(other.min().x, other.max().y, other.min().z),
+            Point3::new(other.min().x, other.max().y, other.max().z),
+            Point3::new(other.max().x, other.min().y, other.min().z),
+            Point3::new(other.max().x, other.min().y, other.max().z),
+            Point3::new(other.max().x, other.max().y, other.min().z),
+            other.max(),
+        ];
+
+        for point in &points {
+            if self.contains_point(point) {
+                return true;
+            }
+        }
+
+        false
+    }
 }
 
 impl Camera {
@@ -58,6 +131,61 @@ impl Camera {
             Vector3::unit_y(),
         )
     }
+
+    pub fn frustrum(&self, projection: &Projection) -> Frustrum {
+        let matrix = projection.calc_matrix() * self.calc_matrix();
+
+        let plane_right = Plane {
+            normal: Vector3::new(matrix[0][3] - matrix[0][0], matrix[1][3] - matrix[1][0], matrix[2][3] - matrix[2][0]),
+            distance: matrix[3][3] - matrix[3][0],
+        };
+
+        let plane_left = Plane {
+            normal: Vector3::new(matrix[0][3] + matrix[0][0], matrix[1][3] + matrix[1][0], matrix[2][3] + matrix[2][0]),
+            distance: matrix[3][3] + matrix[3][0],
+        };
+
+        let plane_bottom = Plane {
+            normal: Vector3::new(matrix[0][3] + matrix[0][1], matrix[1][3] + matrix[1][1], matrix[2][3] + matrix[2][1]),
+            distance: matrix[3][3] + matrix[3][1],
+        };
+
+        let plane_top = Plane {
+            normal: Vector3::new(matrix[0][3] - matrix[0][1], matrix[1][3] - matrix[1][1], matrix[2][3] - matrix[2][1]),
+            distance: matrix[3][3] - matrix[3][1],
+        };
+
+        let plane_near = Plane {
+            normal: Vector3::new(matrix[0][3] + matrix[0][2], matrix[1][3] + matrix[1][2], matrix[2][3] + matrix[2][2]),
+            distance: matrix[3][3] + matrix[3][2],
+        };
+
+        let plane_far = Plane {
+            normal: Vector3::new(matrix[0][3] - matrix[0][2], matrix[1][3] - matrix[1][2], matrix[2][3] - matrix[2][2]),
+            distance: matrix[3][3] - matrix[3][2],
+        };
+
+
+        Frustrum {
+            top: plane_top,
+            bottom: plane_bottom,
+            left: plane_left,
+            right: plane_right,
+            near: plane_near,
+            far: plane_far,
+        }
+    }
+}
+
+// check frustrum intersection for culling
+impl Aabb for Camera {
+    fn min(&self) -> Point3<f32> {
+        self.position - (self.collider / 2.0)
+    }
+
+    fn max(&self) -> Point3<f32> {
+        self.position + (self.collider / 2.0)
+    }
 }
 
 pub struct Projection {
@@ -82,17 +210,11 @@ impl Projection {
     }
 
     pub fn calc_matrix(&self) -> Matrix4<f32> {
+        perspective(self.fovy, self.aspect, self.znear, self.zfar)
+    }
+
+    pub fn calc_matrix_opengl(&self) -> Matrix4<f32> {
         OPENGL_TO_WGPU_MATRIX * perspective(self.fovy, self.aspect, self.znear, self.zfar)
-    }
-}
-
-impl Aabb for Camera {
-    fn min(&self) -> Point3<f32> {
-        self.position - (self.collider / 2.0)
-    }
-
-    fn max(&self) -> Point3<f32> {
-        self.position + (self.collider / 2.0)
     }
 }
 
@@ -232,5 +354,87 @@ impl CameraController {
             camera.position.y = 0.0 + camera.collider.y / 2.0;
             camera.velocity.y = 0.0;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_camera_frustrum_calculation() {
+        // pointing in -z direction
+        let camera = Camera::new(
+            Point3::new(0.0, 0.0, 0.0),
+            cgmath::Deg(-90.),
+            cgmath::Deg(0.0),
+        );
+        let projection = Projection::new(800, 600, cgmath::Deg(70.), 0.1, 100.0);
+        let frustrum = camera.frustrum(&projection);
+
+        assert!(frustrum.contains_point(&Point3::new(0.0, 0.0, -90.0)));
+        assert!(frustrum.contains_point(&Point3::new(0.0, 0.0, -1.0)));
+        assert!(frustrum.contains_point(&Point3::new(50.0, 50.0, -90.0)));
+
+        // at 1 unit from the camera, the frustrum should not contain the point
+        assert!(!frustrum.contains_point(&Point3::new(0.0, 2.0, -1.0)));
+        // behind the frustrum
+        assert!(!frustrum.contains_point(&Point3::new(0.0, 2.0, 1.0)));
+
+        assert!(!frustrum.contains_point(&Point3::new(0.0, 100.0, -10.0)));
+        assert!(!frustrum.contains_point(&Point3::new(100.0, 0.0, -10.0)));
+    }
+
+    #[test]
+    fn test_camera_frustrum_calculation_backwards() {
+        let camera = Camera::new(
+            Point3::new(0.0, 0.0, 0.0),
+            cgmath::Deg(-90.),
+            cgmath::Deg(180.0),
+        );
+        let projection = Projection::new(800, 600, cgmath::Deg(70.), 0.1, 100.0);
+        let frustrum = camera.frustrum(&projection);
+
+        assert!(frustrum.contains_point(&Point3::new(0.0, 0.0, 90.0)));
+        assert!(frustrum.contains_point(&Point3::new(0.0, 0.0, 1.0)));
+        assert!(frustrum.contains_point(&Point3::new(50.0, 50.0, 90.0)));
+
+        // at 1 unit from the camera, the frustrum should not contain the point
+        assert!(!frustrum.contains_point(&Point3::new(0.0, 2.0, 1.0)));
+        // behind the frustrum
+        assert!(!frustrum.contains_point(&Point3::new(0.0, 2.0, -1.0)));
+
+        assert!(!frustrum.contains_point(&Point3::new(0.0, 100.0, 10.0)));
+        assert!(!frustrum.contains_point(&Point3::new(100.0, 0.0, 10.0)));
+    }
+
+    #[test]
+    fn test_frustrum_contains_point() {
+        let frustrum = Frustrum {
+            top: Plane {
+                normal: Vector3::new(0.0, -1.0, 0.0),
+                distance: 1.0,
+            },
+            bottom: Plane {
+                normal: Vector3::new(0.0, 1.0, 0.0),
+                distance: 1.0,
+            },
+            left: Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                distance: 1.0,
+            },
+            right: Plane {
+                normal: Vector3::new(-1.0, 0.0, 0.0),
+                distance: 1.0,
+            },
+            near: Plane {
+                normal: Vector3::new(0.0, 0.0, -1.0),
+                distance: 1.0,
+            },
+            far: Plane {
+                normal: Vector3::new(0.0, 0.0, 1.0),
+                distance: 1.0,
+            },
+        };
     }
 }
