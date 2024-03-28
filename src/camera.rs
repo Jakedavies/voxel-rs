@@ -76,7 +76,7 @@ impl Frustrum {
         ];
 
         for plane in &planes {
-            if plane.normal.dot(point.to_vec()) + plane.distance <= -5.0 {
+            if plane.normal.dot(point.to_vec()) + plane.distance <= 0.0 {
                 return false;
             }
         }
@@ -133,7 +133,7 @@ impl Camera {
     }
 
     pub fn frustrum(&self, projection: &Projection) -> Frustrum {
-        let matrix = projection.calc_matrix() * self.calc_matrix();
+        let matrix = projection.calc_matrix_opengl() * self.calc_matrix();
 
         let plane_right = Plane {
             normal: Vector3::new(matrix[0][3] - matrix[0][0], matrix[1][3] - matrix[1][0], matrix[2][3] - matrix[2][0]),
