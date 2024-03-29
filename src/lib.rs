@@ -1,10 +1,11 @@
 use std::{
     collections::HashMap,
     f32::consts::PI,
+    ops::Deref,
     path::Path,
     sync::{Arc, Mutex},
     thread,
-    time::Instant, ops::Deref,
+    time::Instant,
 };
 
 use block::{BlockType, BLOCK_SIZE};
@@ -182,7 +183,7 @@ impl CameraUniform {
 }
 
 struct State {
-    surface: wgpu::Surface,
+    surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -264,7 +265,13 @@ impl State {
         //
         // The surface needs to live as long as the window that created it.
         // State owns the window, so this should be safe.
-        let surface = unsafe { instance.create_surface(&window) }.unwrap();
+        let surface = unsafe {
+            instance.create_surface_unsafe(
+                wgpu::SurfaceTargetUnsafe::from_window(&window)
+                    .expect("Unable to crate surface target from window"),
+            )
+        }
+        .unwrap();
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -278,10 +285,10 @@ impl State {
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::POLYGON_MODE_LINE,
+                    required_features: wgpu::Features::POLYGON_MODE_LINE,
                     // WebGL doesn't support all of wgpu's features, so if
                     // we're building for the web, we'll have to disable some.
-                    limits: if cfg!(target_arch = "wasm32") {
+                    required_limits: if cfg!(target_arch = "wasm32") {
                         wgpu::Limits::downlevel_webgl2_defaults()
                     } else {
                         wgpu::Limits::default()
@@ -305,6 +312,7 @@ impl State {
             .unwrap_or(surface_caps.formats[0]);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            desired_maximum_frame_latency: 2, // old default?
             format: surface_format,
             width: size.width,
             height: size.height,
@@ -376,7 +384,7 @@ impl State {
                 Some(texture::Texture::DEPTH_FORMAT),
                 &[model::ModelVertex::desc()],
                 shader,
-                &Wireframe::Off
+                &Wireframe::Off,
             )
         };
 
@@ -404,7 +412,7 @@ impl State {
                 Some(texture::Texture::DEPTH_FORMAT),
                 &[model::ModelVertex::desc(), InstanceRaw::desc()],
                 shader,
-                &wireframe
+                &wireframe,
             )
         };
 
@@ -489,15 +497,18 @@ impl State {
                 ..
             } => {
                 if !(self.camera_controller.process_keyboard(*key, *state)) {
-                    if *state == ElementState::Pressed && *key == PhysicalKey::Code(KeyCode::KeyP) && repeat == &false {
-                            self.wireframe.toggle();
-                            self.render_pipeline_dirty = true;
-                            return true
+                    if *state == ElementState::Pressed
+                        && *key == PhysicalKey::Code(KeyCode::KeyP)
+                        && repeat == &false
+                    {
+                        self.wireframe.toggle();
+                        self.render_pipeline_dirty = true;
+                        return true;
                     }
-                    return false
+                    return false;
                 }
                 false
-            },
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 self.camera_controller.process_scroll(delta);
                 true
@@ -628,7 +639,7 @@ impl State {
                     Some(texture::Texture::DEPTH_FORMAT),
                     &[model::ModelVertex::desc(), InstanceRaw::desc()],
                     shader,
-                    &self.wireframe
+                    &self.wireframe,
                 );
             }
         }
@@ -644,7 +655,7 @@ impl State {
                     label: Some("Normal Shader"),
                     source: wgpu::ShaderSource::Wgsl(include_str!("../res/shader.wgsl").into()),
                 },
-                &self.wireframe
+                &self.wireframe,
             );
         }
         self.render_pipeline_dirty = false;
