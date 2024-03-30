@@ -14,6 +14,7 @@ use cgmath::prelude::*;
 use chunk::CHUNK_SIZE;
 use egui_renderer::EguiRenderer;
 use egui_wgpu::ScreenDescriptor;
+use fps::Fps;
 use light::LightUniform;
 use log::{debug, info};
 use model::{DrawLight, DrawModel, ModelVertex};
@@ -44,6 +45,7 @@ mod model;
 mod resources;
 mod texture;
 mod voxel;
+mod fps;
 
 const CHUNK_RENDER_DISTANCE: i32 = 1;
 pub const GRAVITY: f32 = 9.8;
@@ -222,6 +224,7 @@ struct State {
     wireframe: Wireframe,
     render_pipeline_dirty: bool,
     egui_renderer: EguiRenderer,
+    fps_tracker: Fps
 }
 
 #[derive(Clone)]
@@ -478,6 +481,7 @@ impl State {
             noise,
             wireframe,
             render_pipeline_dirty: false,
+            fps_tracker: Fps::new(120),
         }
     }
 
@@ -730,9 +734,8 @@ impl State {
             );
         }
 
-        // submit will accept anything that implements IntoIter
+        self.fps_tracker.update(Instant::now());
 
-        
         self.egui_renderer.draw(
             &self.device,
             &self.queue,
@@ -748,6 +751,7 @@ impl State {
                     ui.label(format!("Camera Position: {:?}", self.camera.position));
                     ui.label(format!("Chunks: {}", self.chunks.len()));
                     ui.label(format!("Instances: {}", self.instances.len()));
+                    ui.label(format!("FPS: {:.2}", self.fps_tracker.get_fps()));
                 });
             },
         );
@@ -815,7 +819,6 @@ fn create_render_pipeline(
                 Wireframe::On => wgpu::PolygonMode::Line,
                 Wireframe::Off => wgpu::PolygonMode::Fill,
             },
-            // Requires Features::DEPTH_CLIP_CONTROL
             unclipped_depth: false,
             // Requires Features::CONSERVATIVE_RASTERIZATION
             conservative: false,

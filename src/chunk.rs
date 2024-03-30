@@ -137,7 +137,6 @@ impl Chunk16 {
                 );
                 let result = frustum.contains(&aabb);
                 if !result {
-                    info!("culling block: {:?}", block.origin() + chunk_offset.to_vec());
                 }
                 result
             })
