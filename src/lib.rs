@@ -12,6 +12,8 @@ use block::{BlockType, BLOCK_SIZE};
 use camera::{Camera, CameraController, Projection};
 use cgmath::prelude::*;
 use chunk::CHUNK_SIZE;
+use egui_renderer::EguiRenderer;
+use egui_wgpu::ScreenDescriptor;
 use light::LightUniform;
 use log::{debug, info};
 use model::{DrawLight, DrawModel, ModelVertex};
@@ -28,12 +30,15 @@ use winit::{
     window::WindowBuilder,
 };
 
-use crate::{block::Render, chunk::Chunk16, model::Vertex, resources::load_texture};
+use crate::{
+    block::Render, chunk::Chunk16,  model::Vertex, resources::load_texture,
+};
 
 mod aabb;
 mod block;
 mod camera;
 mod chunk;
+mod egui_renderer;
 mod light;
 mod model;
 mod resources;
@@ -216,6 +221,7 @@ struct State {
     noise: Fbm<Simplex>,
     wireframe: Wireframe,
     render_pipeline_dirty: bool,
+    egui_renderer: EguiRenderer,
 }
 
 #[derive(Clone)]
@@ -432,8 +438,17 @@ impl State {
         let obj_model = voxel::load_block(&device, &queue).unwrap();
         let noise = Fbm::<Simplex>::new(0);
 
+        let egui_renderer = EguiRenderer::new(
+            &device,       // wgpu Device
+            config.format, // wgpu TextureFormat
+            None,          // this can be None
+            1,             // samples
+            &window,       // winit Window
+        );
+
         Self {
             window,
+            egui_renderer,
             surface,
             device,
             queue,
@@ -485,6 +500,9 @@ impl State {
     }
 
     fn input(&mut self, event: &WindowEvent) -> bool {
+        let window = &self.window;
+        let egui_renderer = &mut self.egui_renderer;
+        egui_renderer.handle_input(window, event);
         match event {
             WindowEvent::KeyboardInput {
                 event:
@@ -713,6 +731,28 @@ impl State {
         }
 
         // submit will accept anything that implements IntoIter
+
+        
+        self.egui_renderer.draw(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &self.window,
+            &view,
+            ScreenDescriptor {
+                size_in_pixels: [self.size.width, self.size.height],
+                pixels_per_point: self.window.scale_factor() as f32,
+            },
+            |ui| {
+                egui::Window::new("Debug").show(ui, |ui| {
+                    ui.label(format!("Camera Position: {:?}", self.camera.position));
+                    ui.label(format!("Chunks: {}", self.chunks.len()));
+                    ui.label(format!("Instances: {}", self.instances.len()));
+                });
+            },
+        );
+
+
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
