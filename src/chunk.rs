@@ -135,10 +135,26 @@ impl Chunk16 {
                     block.min() + chunk_offset.to_vec(),
                     block.max() + chunk_offset.to_vec(),
                 );
-                let result = frustum.contains(&aabb);
-                if !result {
+                frustum.contains(&aabb)
+            })
+            .filter(|block| {
+                // check if block is occluded by another block
+                let pos = block.xyz();
+                let (x, y, z) = (pos.x, pos.y, pos.z);
+                // check bounds 
+                if x == 0 || y == 0 || z == 0 || x == CHUNK_SIZE as u8 - 1|| y == CHUNK_SIZE as u8 - 1 || z == CHUNK_SIZE as u8 - 1 {
+                    return true;
                 }
-                result
+                // inner block
+                let neighbors = [
+                    self.get_block(x + 1, y, z),
+                    self.get_block(x - 1, y, z),
+                    self.get_block(x, y + 1, z),
+                    self.get_block(x, y - 1, z),
+                    self.get_block(x, y, z + 1),
+                    self.get_block(x, y, z - 1),
+                ];
+                !neighbors.iter().all(|n| n.is_active) // all neighbors are active, so this block is occluded, return false
             })
             .map(|block| Instance {
                 position: block.origin() + chunk_offset.to_vec(),

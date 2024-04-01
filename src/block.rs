@@ -46,6 +46,10 @@ impl Block {
         }
     }
 
+    pub fn xyz(&self) -> Point3<u8> {
+       self.chunk_space_origin
+    }
+
     pub fn origin(&self) -> Point3<f32> {
         self.chunk_space_origin.cast::<f32>().unwrap() * BLOCK_SIZE
     }

@@ -325,7 +325,7 @@ impl State {
             format: surface_format,
             width: size.width,
             height: size.height,
-            present_mode: surface_caps.present_modes[0],
+            present_mode: wgpu::PresentMode::AutoNoVsync,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
         };
@@ -841,7 +841,8 @@ fn create_render_pipeline(
 
 pub async fn run() {
     let event_loop = EventLoop::new().unwrap();
-    let window = WindowBuilder::new().build(&event_loop).unwrap();
+    let window = WindowBuilder::new()
+        .build(&event_loop).unwrap();
 
     let file_watcher = FileWatcher::default();
 
