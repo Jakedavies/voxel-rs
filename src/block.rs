@@ -28,39 +28,31 @@ impl Into<u16> for BlockType {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Block {
     pub is_active: bool,
     pub is_selected: bool,
     pub t: BlockType,
-    chunk_space_origin: cgmath::Point3<u8>,
+    pub origin: cgmath::Point3<f32>,
 }
 
 impl Block {
-    pub fn new(position: Point3<u8>) -> Self {
+    pub fn new(origin: Point3<f32>) -> Self {
         Self {
             is_active: false,
             is_selected: false,
             t: BlockType::Stone,
-            chunk_space_origin: position,
+            origin
         }
-    }
-
-    pub fn xyz(&self) -> Point3<u8> {
-       self.chunk_space_origin
-    }
-
-    pub fn origin(&self) -> Point3<f32> {
-        self.chunk_space_origin.cast::<f32>().unwrap() * BLOCK_SIZE
     }
 }
 
 impl Aabb for Block {
     fn min(&self) -> Point3<f32> {
-        self.origin() - Vector3::new(BLOCK_SIZE / 2.0, BLOCK_SIZE / 2.0, BLOCK_SIZE / 2.0)
+        self.origin - Vector3::new(BLOCK_SIZE / 2.0, BLOCK_SIZE / 2.0, BLOCK_SIZE / 2.0)
     }
     fn max(&self) -> Point3<f32> {
-        self.origin() + Vector3::new(BLOCK_SIZE / 2.0, BLOCK_SIZE / 2.0, BLOCK_SIZE / 2.0)
+        self.origin + Vector3::new(BLOCK_SIZE / 2.0, BLOCK_SIZE / 2.0, BLOCK_SIZE / 2.0)
     }
 }
 
@@ -69,3 +61,21 @@ pub trait Render {
 }
 
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_block_min_max() {
+        let block = Block::new(Point3::new(0.0, 0.0, 0.0));
+        assert_eq!(block.min(), Point3::new(-1.0, -1.0, -1.0));
+        assert_eq!(block.max(), Point3::new(1.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn test_block_min_max_2() {
+        let block = Block::new(Point3::new(16.0, 16.0, 16.0));
+        assert_eq!(block.min(), Point3::new(15.0, 15.0, 15.0));
+        assert_eq!(block.max(), Point3::new(17.0, 17.0, 17.0));
+    }
+}

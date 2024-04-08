@@ -45,6 +45,7 @@ mod model;
 mod resources;
 mod texture;
 mod voxel;
+mod physics;
 mod fps;
 
 const CHUNK_RENDER_DISTANCE: i32 = 1;
@@ -336,7 +337,7 @@ impl State {
         let camera = camera::Camera::new((9.5, 1.0, -11.27), cgmath::Deg(-90.), cgmath::Rad(-0.0));
         let projection =
             camera::Projection::new(size.width, size.height, cgmath::Deg(67.0), 0.1, 100.);
-        let camera_controller = CameraController::new(10.0, 1.0, 20.0);
+        let camera_controller = CameraController::new(10.0, 1.0, 20.0, 20.);
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera, &projection);
 
@@ -549,6 +550,9 @@ impl State {
 
     fn update(&mut self, dt: std::time::Duration) {
         self.camera_controller.update_camera(&mut self.camera, dt);
+        physics::update_body(&mut self.camera, &self.chunks, dt);
+
+
         self.camera_uniform
             .update_view_proj(&self.camera, &self.projection);
         self.queue.write_buffer(

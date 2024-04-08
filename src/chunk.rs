@@ -1,7 +1,8 @@
 use crate::{
-    aabb::{Aabb, SimpleAabb},
+    aabb::{Aabb, AabbBounds},
     block::{Block, BlockType, Render, BLOCK_SIZE},
-    Instance, camera::Frustrum,
+    camera::Frustrum,
+    Instance,
 };
 use cgmath::{prelude::*, Point3, Vector3};
 use log::info;
@@ -18,7 +19,7 @@ pub trait Chunk {
 
 pub struct Chunk16 {
     pub origin: cgmath::Point3<i32>,
-    blocks: [Block; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE],
+    pub blocks: [Block; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE],
 }
 
 impl Chunk16 {
@@ -26,17 +27,27 @@ impl Chunk16 {
         Self {
             origin: cgmath::Point3::new(x, y, z),
             blocks: {
-                let mut blocks =
-                    [Block::new(Point3::new(0, 0, 0)); CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
-                for x in 0..CHUNK_SIZE {
-                    for y in 0..CHUNK_SIZE {
-                        for z in 0..CHUNK_SIZE {
-                            let index = Self::xyz_to_index(x as u8, y as u8, z as u8);
-                            blocks[index] = Block::new(Point3::new(x as u8, y as u8, z as u8));
-                        }
-                    }
+                let mut blocks = Vec::with_capacity(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE);
+                let chunk_origin = cgmath::Point3::new(
+                    x as f32 * CHUNK_SIZE as f32 * BLOCK_SIZE,
+                    y as f32 * CHUNK_SIZE as f32 * BLOCK_SIZE,
+                    z as f32 * CHUNK_SIZE as f32 * BLOCK_SIZE,
+                );
+
+                for index in 0..CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE {
+                    blocks.push(Block::new(chunk_origin));
+                    let (x_, y_, z_) = Self::index_to_xyz(index);
+                    let block_origin = chunk_origin
+                        + cgmath::Vector3::new(
+                            x_ as f32 * BLOCK_SIZE + BLOCK_SIZE / 2.0,
+                            y_ as f32 * BLOCK_SIZE + BLOCK_SIZE / 2.0,
+                            z_ as f32 * BLOCK_SIZE + BLOCK_SIZE / 2.0,
+                        );
+                    blocks[index] = Block::new(block_origin);
                 }
-                blocks
+                blocks[..CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE]
+                    .try_into()
+                    .unwrap()
             },
         }
     }
@@ -45,9 +56,9 @@ impl Chunk16 {
         // for min/max on this chunk, generate a 2d noise map
         for x in self.origin.x * CHUNK_SIZE as i32..(self.origin.x + 1) * CHUNK_SIZE as i32 {
             for z in self.origin.z * CHUNK_SIZE as i32..(self.origin.z + 1) * CHUNK_SIZE as i32 {
-
                 // we are rendering chunk on the -1 y so we shift down by 1
-                let height = noise.get([x as f64 * NOISE_SCALE, z as f64 * NOISE_SCALE]) * 16. + 8.0 - 16.0;
+                let height =
+                    noise.get([x as f64 * NOISE_SCALE, z as f64 * NOISE_SCALE]) * 16. + 8.0 - 16.0;
                 info!("height for {} {}: {}", x, z, height);
 
                 for y in self.origin.y * CHUNK_SIZE as i32..(self.origin.y + 1) * CHUNK_SIZE as i32
@@ -107,9 +118,10 @@ impl Render for Chunk16 {
         let chunk_offset = self.origin.cast::<f32>().unwrap() * BLOCK_SIZE * CHUNK_SIZE as f32;
         self.blocks
             .iter()
-            .filter(|block| block.is_active)
-            .map(|block| Instance {
-                position: block.origin() + chunk_offset.to_vec(),
+            .enumerate()
+            .filter(|(index, block)| block.is_active)
+            .map(|(index, block)| Instance {
+                position: block.origin,
                 block_type: block.t,
                 is_selected: block.is_selected,
                 ..Default::default()
@@ -118,31 +130,37 @@ impl Render for Chunk16 {
     }
 }
 
-
 impl Chunk16 {
     fn xyz_to_index(x: u8, y: u8, z: u8) -> usize {
         let (x, y, z) = (x as usize, y as usize, z as usize);
         x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE
     }
 
+    fn index_to_xyz(index: usize) -> (u8, u8, u8) {
+        let x = index % CHUNK_SIZE;
+        let y = (index / CHUNK_SIZE) % CHUNK_SIZE;
+        let z = index / CHUNK_SIZE / CHUNK_SIZE;
+        (x as u8, y as u8, z as u8)
+    }
+
     pub fn culled_render(&self, frustum: &Frustrum) -> Vec<Instance> {
-        let chunk_offset = self.origin.cast::<f32>().unwrap() * BLOCK_SIZE * CHUNK_SIZE as f32;
         self.blocks
             .iter()
-            .filter(|block| block.is_active)
-            .filter(|block| {
-                let aabb = SimpleAabb::new(
-                    block.min() + chunk_offset.to_vec(),
-                    block.max() + chunk_offset.to_vec(),
-                );
-                frustum.contains(&aabb)
-            })
-            .filter(|block| {
+            .enumerate()
+            .map(|(index, block)| (Self::index_to_xyz(index), block))
+            .filter(|(_, block)| block.is_active)
+            .filter(|(_, block)| frustum.contains(&block.aabb()))
+            .filter(|(pos, _block)| {
                 // check if block is occluded by another block
-                let pos = block.xyz();
-                let (x, y, z) = (pos.x, pos.y, pos.z);
-                // check bounds 
-                if x == 0 || y == 0 || z == 0 || x == CHUNK_SIZE as u8 - 1|| y == CHUNK_SIZE as u8 - 1 || z == CHUNK_SIZE as u8 - 1 {
+                let (x, y, z) = (pos.0, pos.1, pos.2);
+                // check bounds
+                if x == 0
+                    || y == 0
+                    || z == 0
+                    || x == CHUNK_SIZE as u8 - 1
+                    || y == CHUNK_SIZE as u8 - 1
+                    || z == CHUNK_SIZE as u8 - 1
+                {
                     return true;
                 }
                 // inner block
@@ -156,8 +174,8 @@ impl Chunk16 {
                 ];
                 !neighbors.iter().all(|n| n.is_active) // all neighbors are active, so this block is occluded, return false
             })
-            .map(|block| Instance {
-                position: block.origin() + chunk_offset.to_vec(),
+            .map(|(_, block)| Instance {
+                position: block.origin,
                 block_type: block.t,
                 is_selected: block.is_selected,
                 ..Default::default()
@@ -180,5 +198,20 @@ impl Chunk for Chunk16 {
     fn set_block(&mut self, x: u8, y: u8, z: u8, block: Block) {
         let index = Self::xyz_to_index(x, y, z);
         self.blocks[index] = block;
+    }
+}
+
+impl Aabb for Chunk16 {
+    fn min(&self) -> Point3<f32> {
+        self.origin.cast::<f32>().unwrap() * BLOCK_SIZE * CHUNK_SIZE as f32
+    }
+
+    fn max(&self) -> Point3<f32> {
+        self.origin.cast::<f32>().unwrap() * BLOCK_SIZE * CHUNK_SIZE as f32
+            + Vector3::new(
+                BLOCK_SIZE * CHUNK_SIZE as f32,
+                BLOCK_SIZE * CHUNK_SIZE as f32,
+                BLOCK_SIZE * CHUNK_SIZE as f32,
+            )
     }
 }

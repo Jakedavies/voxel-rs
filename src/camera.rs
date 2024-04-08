@@ -13,6 +13,7 @@ use winit::{
 };
 
 use crate::aabb::Aabb;
+use crate::physics::KinematicBody;
 use crate::GRAVITY;
 
 #[rustfmt::skip]
@@ -230,12 +231,13 @@ pub struct CameraController {
     rotate_vertical: f32,
     scroll: f32,
     speed: f32,
+    acceleration: f32,
     sensitivity: f32,
     jump_velocity: f32,
 }
 
 impl CameraController {
-    pub fn new(speed: f32, sensitivity: f32, jump_velocity: f32) -> Self {
+    pub fn new(speed: f32, sensitivity: f32, jump_velocity: f32, acceleration: f32) -> Self {
         Self {
             amount_left: 0.0,
             amount_right: 0.0,
@@ -247,6 +249,7 @@ impl CameraController {
             rotate_vertical: 0.0,
             scroll: 0.0,
             speed,
+            acceleration,
             sensitivity,
             jump_velocity,
         }
@@ -312,19 +315,18 @@ impl CameraController {
         let (yaw_sin, yaw_cos) = camera.yaw.0.sin_cos();
         let forward = Vector3::new(yaw_cos, 0.0, yaw_sin).normalize();
         let right = Vector3::new(-yaw_sin, 0.0, yaw_cos).normalize();
-        camera.position += forward * (self.amount_forward - self.amount_backward) * self.speed * dt;
-        camera.position += right * (self.amount_right - self.amount_left) * self.speed * dt;
+
+        camera.velocity += forward * (self.amount_forward - self.amount_backward) * self.acceleration * dt;
+        camera.velocity += right * (self.amount_right - self.amount_left) * self.acceleration * dt;
+        // clamp velocity to max speed
+        camera.velocity.x = camera.velocity.x.clamp(-self.speed, self.speed);
+        camera.velocity.z = camera.velocity.z.clamp(-self.speed, self.speed);
 
         // Move in/out (aka. "zoom")
         // Note: this isn't an actual zoom. The camera's position
         // changes when zooming. I've added this to make it easier
         // to get closer to an object you want to focus on.
         let (pitch_sin, pitch_cos) = camera.pitch.0.sin_cos();
-        let scrollward =
-            Vector3::new(pitch_cos * yaw_cos, pitch_sin, pitch_cos * yaw_sin).normalize();
-        camera.position += scrollward * self.scroll * self.speed * self.sensitivity * dt;
-        self.scroll = 0.0;
-
         // Move up/down. Since we don't use roll, we can just
         // modify the y coordinate directly.
         camera.velocity.y += self.amount_up * self.jump_velocity * dt;
@@ -345,15 +347,16 @@ impl CameraController {
         } else if camera.pitch > Rad(SAFE_FRAC_PI_2) {
             camera.pitch = Rad(SAFE_FRAC_PI_2);
         }
+    }
+}
 
-        // apply gravity, then check collider min > 0, if < 0, set to 0
-        camera.velocity.y -= GRAVITY * dt;
-        camera.position.y += camera.velocity.y * dt;
+impl KinematicBody for Camera {
+    fn velocity(&mut self) -> &mut Vector3<f32> {
+        &mut self.velocity
+    }
 
-        if camera.min().y < 0.0 {
-            camera.position.y = 0.0 + camera.collider.y / 2.0;
-            camera.velocity.y = 0.0;
-        }
+    fn position(&mut self) -> &mut Point3<f32> {
+        &mut self.position
     }
 }
 
