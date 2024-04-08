@@ -50,12 +50,11 @@ impl Aabb for CubeCollider {
 
 // this function will take a list of chunks and a cube collider and return the reverse direction of the collision
 fn collide_chunks(
-    chunks: &Vec<Chunk16>,
+    chunks: &[Chunk16],
     cube_collider: &CubeCollider,
     velocity: cgmath::Vector3<f32>,
 ) -> Option<cgmath::Vector3<f32>> {
     // build an aabb from the current position and future position to prune chunks
-    let old_aabb = cube_collider.aabb();
     let mut new_position = (*cube_collider).clone();
     new_position.origin += velocity;
 
@@ -63,17 +62,16 @@ fn collide_chunks(
     let blocks = chunks
         .iter()
         .filter(|chunk| (*chunk).aabb().intersects(&new_position))
-        .flat_map(|chunk| chunk.blocks.iter());
+        .flat_map(|chunk| chunk.blocks.iter())
+        .filter(|block| block.is_active);
 
     let mut collision_reverse = cgmath::Vector3::new(0.0, 0.0, 0.0);
     if blocks.clone().count() == 0 {
         return None;
     }
-    println!("new position: {:?}", new_position.aabb());
     // for each intersection axis, take the max reverse direction
     for block in blocks {
         if let Some(collision_info) = new_position.aabb().intersection(&block.aabb()) {
-            println!("collision info: {:?}, {:?}", block.aabb(), collision_info);
             // abs value of penetration in each axis
             if collision_info.vector().x.abs() > collision_reverse.x.abs() {
                 collision_reverse.x = collision_info.vector().x;
@@ -92,7 +90,7 @@ fn collide_chunks(
 
 pub fn update_body(
     body: &mut impl KinematicBody,
-    chunks: &Vec<Chunk16>,
+    chunks: &[Chunk16],
     dt: Duration,
 ) {
     // apply gravity to velocity
@@ -155,7 +153,6 @@ mod tests {
     #[test]
     fn test_collide_chunks() {
         let chunk = Chunk16::new(0, 0, 0);
-        println!("Chunk: {:?}", chunk.blocks.first().unwrap().aabb());
         let chunks = vec![chunk];
         let cube_collider = CubeCollider {
             height: 1.0,

@@ -100,12 +100,8 @@ impl AabbBounds {
             max_b.z - min_a.z,
         ];
 
-        println!("distances: {:?}", distances);
-
         let min_distance = distances.iter().cloned().fold(f32::INFINITY, f32::min);
-        println!("min_distance: {:?}", min_distance);
         let axis = distances.iter().position(|&d| d == min_distance).unwrap();
-        println!("axis: {:?}", axis);
 
         let normal = match axis {
             0 => cgmath::Vector3::new(1.0, 0.0, 0.0),
