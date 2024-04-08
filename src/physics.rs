@@ -3,13 +3,14 @@ use std::time::Duration;
 use cgmath::num_traits::Float;
 use wgpu::naga::Block;
 
-use crate::{aabb::Aabb, chunk::Chunk16};
+use crate::{aabb::{Aabb, AabbBounds}, chunk::Chunk16};
 
 const GRAVITY: f32 = 9.8;
 
 pub trait KinematicBody {
     fn velocity(&mut self) -> &mut cgmath::Vector3<f32>;
     fn position(&mut self) -> &mut cgmath::Point3<f32>;
+    fn collider(&self) -> AabbBounds;
 }
 
 #[derive(Debug, PartialEq)]
@@ -32,7 +33,7 @@ impl CollisionInfo {
 }
 
 #[derive(Clone)]
-struct CubeCollider {
+pub struct CubeCollider {
     height: f32,
     width: f32,
     origin: cgmath::Point3<f32>,
@@ -51,17 +52,13 @@ impl Aabb for CubeCollider {
 // this function will take a list of chunks and a cube collider and return the reverse direction of the collision
 fn collide_chunks(
     chunks: &[Chunk16],
-    cube_collider: &CubeCollider,
-    velocity: cgmath::Vector3<f32>,
+    collision_body: &impl Aabb
 ) -> Option<cgmath::Vector3<f32>> {
     // build an aabb from the current position and future position to prune chunks
-    let mut new_position = (*cube_collider).clone();
-    new_position.origin += velocity;
-
     // test this larger aabb against all the chunks to see if any are relevant
     let blocks = chunks
         .iter()
-        .filter(|chunk| (*chunk).aabb().intersects(&new_position))
+        .filter(|chunk| (*chunk).aabb().intersects(collision_body))
         .flat_map(|chunk| chunk.blocks.iter())
         .filter(|block| block.is_active);
 
@@ -71,7 +68,7 @@ fn collide_chunks(
     }
     // for each intersection axis, take the max reverse direction
     for block in blocks {
-        if let Some(collision_info) = new_position.aabb().intersection(&block.aabb()) {
+        if let Some(collision_info) = collision_body.aabb().intersection(&block.aabb()) {
             // abs value of penetration in each axis
             if collision_info.vector().x.abs() > collision_reverse.x.abs() {
                 collision_reverse.x = collision_info.vector().x;
@@ -93,22 +90,19 @@ pub fn update_body(
     chunks: &[Chunk16],
     dt: Duration,
 ) {
+    let collider = body.collider();
     // apply gravity to velocity
     body.velocity().y -= GRAVITY * dt.as_secs_f32();
 
     // apply velocity to position
     body.position().x += body.velocity().x * dt.as_secs_f32();
     body.position().y += body.velocity().y * dt.as_secs_f32();
+    body.position().z += body.velocity().z * dt.as_secs_f32();
 
     // collide with chunks
     if let Some(collision_vector) = collide_chunks(
         chunks,
-        &CubeCollider {
-            height: 1.0,
-            width: 1.0,
-            origin: *body.position(),
-        },
-        *body.velocity(),
+        &collider,
     ) {
         // zero out the velocity in the direction of the collision
         // update the position with the inverse of the collision
@@ -127,6 +121,7 @@ pub fn update_body(
             body.position().z -= collision_vector.z;
         }
     }
+    let collider = body.collider();
 }
 
 

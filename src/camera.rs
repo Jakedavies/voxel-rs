@@ -12,8 +12,8 @@ use winit::{
     keyboard::{Key, KeyCode, NamedKey, PhysicalKey},
 };
 
-use crate::aabb::Aabb;
-use crate::physics::KinematicBody;
+use crate::aabb::{Aabb, AabbBounds};
+use crate::physics::{CubeCollider, KinematicBody};
 use crate::GRAVITY;
 
 #[rustfmt::skip]
@@ -357,6 +357,14 @@ impl KinematicBody for Camera {
 
     fn position(&mut self) -> &mut Point3<f32> {
         &mut self.position
+    }
+
+    fn collider(&self) -> AabbBounds {
+        // collider cube where camera origin is offset towards top of collider
+        AabbBounds::new(
+            self.position - Vector3::new(-0.4, -1., -0.4),
+            self.position + Vector3::new(0.4, 1., 0.4),
+        )
     }
 }
 

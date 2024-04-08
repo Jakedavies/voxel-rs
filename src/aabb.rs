@@ -47,7 +47,7 @@ pub trait Aabb {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AabbBounds {
     min: Point3<f32>,
     max: Point3<f32>,

@@ -334,7 +334,7 @@ impl State {
 
         let (texture_bind_group_layout, diffuse_bind_group) = texture::setup(&device, &queue).await;
 
-        let camera = camera::Camera::new((9.5, 1.0, -11.27), cgmath::Deg(-90.), cgmath::Rad(-0.0));
+        let camera = camera::Camera::new((9.5, 10.0, -11.27), cgmath::Deg(-90.), cgmath::Rad(-0.0));
         let projection =
             camera::Projection::new(size.width, size.height, cgmath::Deg(67.0), 0.1, 100.);
         let camera_controller = CameraController::new(10.0, 1.0, 20.0, 20.0);
