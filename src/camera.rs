@@ -316,17 +316,13 @@ impl CameraController {
         let forward = Vector3::new(yaw_cos, 0.0, yaw_sin).normalize();
         let right = Vector3::new(-yaw_sin, 0.0, yaw_cos).normalize();
 
-        camera.velocity += forward * (self.amount_forward - self.amount_backward) * self.acceleration * dt;
-        camera.velocity += right * (self.amount_right - self.amount_left) * self.acceleration * dt;
+        camera.velocity = Vector3::new(0.0, camera.velocity.y, 0.0);
+        camera.velocity += forward * (self.amount_forward - self.amount_backward) * self.speed;
+        camera.velocity += right * (self.amount_right - self.amount_left) * self.speed;
         // clamp velocity to max speed
         camera.velocity.x = camera.velocity.x.clamp(-self.speed, self.speed);
         camera.velocity.z = camera.velocity.z.clamp(-self.speed, self.speed);
 
-        // Move in/out (aka. "zoom")
-        // Note: this isn't an actual zoom. The camera's position
-        // changes when zooming. I've added this to make it easier
-        // to get closer to an object you want to focus on.
-        let (pitch_sin, pitch_cos) = camera.pitch.0.sin_cos();
         // Move up/down. Since we don't use roll, we can just
         // modify the y coordinate directly.
         camera.velocity.y += self.amount_up * self.jump_velocity * dt;
@@ -362,8 +358,8 @@ impl KinematicBody for Camera {
     fn collider(&self) -> AabbBounds {
         // collider cube where camera origin is offset towards top of collider
         AabbBounds::new(
-            self.position - Vector3::new(-0.4, -1., -0.4),
-            self.position + Vector3::new(0.4, 1., 0.4),
+            self.position - Vector3::new(0.4, 3., 0.4),
+            self.position + Vector3::new(0.4, 0., 0.4),
         )
     }
 }

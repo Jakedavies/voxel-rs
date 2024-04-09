@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use cgmath::num_traits::Float;
+use log::info;
 use wgpu::naga::Block;
 
 use crate::{aabb::{Aabb, AabbBounds}, chunk::Chunk16};
@@ -60,6 +61,7 @@ fn collide_chunks(
         .iter()
         .filter(|chunk| (*chunk).aabb().intersects(collision_body))
         .flat_map(|chunk| chunk.blocks.iter())
+        .filter(|block| block.aabb().intersects(collision_body))
         .filter(|block| block.is_active);
 
     let mut collision_reverse = cgmath::Vector3::new(0.0, 0.0, 0.0);
@@ -69,6 +71,7 @@ fn collide_chunks(
     // for each intersection axis, take the max reverse direction
     for block in blocks {
         if let Some(collision_info) = collision_body.aabb().intersection(&block.aabb()) {
+            info!("collision info: {:?}", collision_info);
             // abs value of penetration in each axis
             if collision_info.vector().x.abs() > collision_reverse.x.abs() {
                 collision_reverse.x = collision_info.vector().x;
@@ -79,6 +82,8 @@ fn collide_chunks(
             if collision_info.vector().z.abs() > collision_reverse.z.abs() {
                 collision_reverse.z = collision_info.vector().z;
             }
+        } else {
+            info!("no collision info");
         }
     }
 
@@ -104,6 +109,7 @@ pub fn update_body(
         chunks,
         &collider,
     ) {
+        info!("collision vector: {:?}", collision_vector);
         // zero out the velocity in the direction of the collision
         // update the position with the inverse of the collision
         if collision_vector.x != 0.0 {
