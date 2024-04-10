@@ -4,13 +4,38 @@ use cgmath::num_traits::Float;
 use log::info;
 use wgpu::naga::Block;
 
-use crate::{aabb::{Aabb, AabbBounds}, chunk::Chunk16};
+use crate::{
+    aabb::{Aabb, AabbBounds},
+    chunk::Chunk16,
+};
 
-const GRAVITY: f32 = 9.8;
+const GRAVITY: f32 = 9.8 * 2.0; // our blocks are 2.0 wide, gravity feels funky unless scaled
+
+#[derive(Debug, PartialEq)]
+pub enum Grounded {
+    Yes,
+    No,
+}
+
+#[derive(Debug)]
+pub struct KinematicBodyState {
+    pub velocity: cgmath::Vector3<f32>,
+    pub position: cgmath::Point3<f32>,
+    pub grounded: Grounded,
+}
+
+impl KinematicBodyState {
+    pub fn new() -> Self {
+        Self {
+            velocity: cgmath::Vector3::new(0.0, 0.0, 0.0),
+            position: cgmath::Point3::new(0.0, 0.0, 0.0),
+            grounded: Grounded::No,
+        }
+    }
+}
 
 pub trait KinematicBody {
-    fn velocity(&mut self) -> &mut cgmath::Vector3<f32>;
-    fn position(&mut self) -> &mut cgmath::Point3<f32>;
+    fn state(&mut self) -> &mut KinematicBodyState;
     fn collider(&self) -> AabbBounds;
 }
 
@@ -35,9 +60,9 @@ impl CollisionInfo {
 
 #[derive(Clone)]
 pub struct CubeCollider {
-    height: f32,
-    width: f32,
-    origin: cgmath::Point3<f32>,
+    pub height: f32,
+    pub width: f32,
+    pub origin: cgmath::Point3<f32>,
 }
 
 impl Aabb for CubeCollider {
@@ -51,10 +76,7 @@ impl Aabb for CubeCollider {
 }
 
 // this function will take a list of chunks and a cube collider and return the reverse direction of the collision
-fn collide_chunks(
-    chunks: &[Chunk16],
-    collision_body: &impl Aabb
-) -> Option<cgmath::Vector3<f32>> {
+fn collide_chunks(chunks: &[Chunk16], collision_body: &impl Aabb) -> Option<cgmath::Vector3<f32>> {
     // build an aabb from the current position and future position to prune chunks
     // test this larger aabb against all the chunks to see if any are relevant
     let blocks = chunks
@@ -90,46 +112,55 @@ fn collide_chunks(
     Some(collision_reverse)
 }
 
-pub fn update_body(
-    body: &mut impl KinematicBody,
-    chunks: &[Chunk16],
-    dt: Duration,
-) {
+pub fn update_body(body: &mut impl KinematicBody, chunks: &[Chunk16], dt: Duration) {
+    {
+        let physics_state = body.state();
+        // apply gravity to velocity
+        physics_state.velocity.y -= GRAVITY * dt.as_secs_f32();
+
+        
+
+        // apply velocity to position
+        physics_state.position.x += physics_state.velocity.x * dt.as_secs_f32();
+        physics_state.position.y += physics_state.velocity.y * dt.as_secs_f32();
+        physics_state.position.z += physics_state.velocity.z * dt.as_secs_f32();
+    }
+
     let collider = body.collider();
-    // apply gravity to velocity
-    body.velocity().y -= GRAVITY * dt.as_secs_f32();
-
-    // apply velocity to position
-    body.position().x += body.velocity().x * dt.as_secs_f32();
-    body.position().y += body.velocity().y * dt.as_secs_f32();
-    body.position().z += body.velocity().z * dt.as_secs_f32();
-
+    let physics_state = body.state();
     // collide with chunks
-    if let Some(collision_vector) = collide_chunks(
-        chunks,
-        &collider,
-    ) {
-        info!("collision vector: {:?}", collision_vector);
+    if let Some(collision_vector) = collide_chunks(chunks, &collider) {
         // zero out the velocity in the direction of the collision
         // update the position with the inverse of the collision
         if collision_vector.x != 0.0 {
-            body.velocity().x = 0.0;
-            body.position().x -= collision_vector.x;
+            physics_state.velocity.x = 0.0;
+            physics_state.position.x -= collision_vector.x;
         }
 
         if collision_vector.y != 0.0 {
-            body.velocity().y = 0.0;
-            body.position().y -= collision_vector.y;
+            physics_state.velocity.y = 0.0;
+            physics_state.position.y -= collision_vector.y;
         }
 
         if collision_vector.z != 0.0 {
-            body.velocity().z = 0.0;
-            body.position().z -= collision_vector.z;
+            physics_state.velocity.z = 0.0;
+            physics_state.position.z -= collision_vector.z;
         }
     }
-    let collider = body.collider();
-}
 
+    // test if we are grounded, extend the collider by a small amount in the y direction
+    let mut grounded_collider = collider;
+    grounded_collider.min.y -= 0.05;
+    if let Some(collision_vector) = collide_chunks(chunks, &grounded_collider) {
+        if collision_vector.y != 0.0 {
+            physics_state.grounded = Grounded::Yes;
+        } else {
+            physics_state.grounded = Grounded::No;
+        }
+    } else {
+        physics_state.grounded = Grounded::No;
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -146,8 +177,7 @@ mod tests {
             width: 1.0,
             origin: cgmath::Point3::new(-1.0, 0.0, 0.0),
         };
-        let velocity = cgmath::Vector3::new(-1.0, 0.0, 0.0);
-        let result = collide_chunks(&chunks, &cube_collider, velocity);
+        let result = collide_chunks(&chunks, &cube_collider);
         assert_eq!(result, None)
     }
 
@@ -160,10 +190,13 @@ mod tests {
             width: 1.0,
             origin: cgmath::Point3::new(-0.5, 2.0, 2.0),
         };
-        let velocity = cgmath::Vector3::new(0.1, 0.0, 0.0);
-        let result = collide_chunks(&chunks, &cube_collider, velocity);
+        let result = collide_chunks(&chunks, &cube_collider);
 
         // we expect a collision in the x axis, accounting for floating point error
-        assert!(AbsDiffEq::abs_diff_eq(&result.unwrap(), &cgmath::Vector3::new(0.1, 0.0, 0.0), 1e-6));
+        assert!(AbsDiffEq::abs_diff_eq(
+            &result.unwrap(),
+            &cgmath::Vector3::new(0.1, 0.0, 0.0),
+            1e-6
+        ));
     }
 }

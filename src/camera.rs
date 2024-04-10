@@ -13,7 +13,7 @@ use winit::{
 };
 
 use crate::aabb::{Aabb, AabbBounds};
-use crate::physics::{CubeCollider, KinematicBody};
+use crate::physics::{CubeCollider, Grounded, KinematicBody, KinematicBodyState};
 use crate::GRAVITY;
 
 #[rustfmt::skip]
@@ -28,32 +28,15 @@ const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
 
 #[derive(Debug)]
 pub struct Camera {
-    pub position: Point3<f32>,
     yaw: Rad<f32>,
     pitch: Rad<f32>,
     collider: Vector3<f32>,
-    pub velocity: Vector3<f32>,
+    pub physics_state: KinematicBodyState,
 }
 
 pub struct Plane {
     pub normal: Vector3<f32>,
     pub distance: f32,
-}
-
-impl Plane {
-    pub fn new(normal: Vector3<f32>, point: Point3<f32>) -> Self {
-        Self {
-            normal,
-            distance: -normal.dot(point.to_vec()),
-        }
-    }
-
-    pub fn from_normal_and_point(normal: Vector3<f32>, point: Point3<f32>) -> Self {
-        Self {
-            normal,
-            distance: -normal.dot(point.to_vec()),
-        }
-    }
 }
 
 pub struct Frustrum {
@@ -114,11 +97,14 @@ impl Camera {
         pitch: P,
     ) -> Self {
         Self {
-            position: position.into(),
             yaw: yaw.into(),
             pitch: pitch.into(),
             collider: Vector3::new(0.8, 2.0, 0.8),
-            velocity: Vector3::new(0.0, 0.0, 0.0),
+            physics_state: {
+                let mut state = KinematicBodyState::new();
+                state.position = position.into();
+                state
+            },
         }
     }
 
@@ -127,7 +113,7 @@ impl Camera {
         let (sin_yaw, cos_yaw) = self.yaw.0.sin_cos();
 
         Matrix4::look_to_rh(
-            self.position,
+            self.physics_state.position,
             Vector3::new(cos_pitch * cos_yaw, sin_pitch, cos_pitch * sin_yaw).normalize(),
             Vector3::unit_y(),
         )
@@ -181,11 +167,11 @@ impl Camera {
 // check frustrum intersection for culling
 impl Aabb for Camera {
     fn min(&self) -> Point3<f32> {
-        self.position - (self.collider / 2.0)
+        self.physics_state.position - (self.collider / 2.0)
     }
 
     fn max(&self) -> Point3<f32> {
-        self.position + (self.collider / 2.0)
+        self.physics_state.position + (self.collider / 2.0)
     }
 }
 
@@ -210,10 +196,6 @@ impl Projection {
         self.aspect = width as f32 / height as f32;
     }
 
-    pub fn calc_matrix(&self) -> Matrix4<f32> {
-        perspective(self.fovy, self.aspect, self.znear, self.zfar)
-    }
-
     pub fn calc_matrix_opengl(&self) -> Matrix4<f32> {
         OPENGL_TO_WGPU_MATRIX * perspective(self.fovy, self.aspect, self.znear, self.zfar)
     }
@@ -229,10 +211,9 @@ pub struct CameraController {
     amount_down: f32,
     rotate_horizontal: f32,
     rotate_vertical: f32,
-    scroll: f32,
     speed: f32,
-    acceleration: f32,
     sensitivity: f32,
+    acceleration: f32,
     jump_velocity: f32,
 }
 
@@ -247,20 +228,19 @@ impl CameraController {
             amount_down: 0.0,
             rotate_horizontal: 0.0,
             rotate_vertical: 0.0,
-            scroll: 0.0,
             speed,
-            acceleration,
             sensitivity,
+            acceleration,
             jump_velocity,
         }
     }
 
     pub fn process_keyboard(&mut self, key: PhysicalKey, state: ElementState) -> bool {
-        let amount = if state == ElementState::Pressed {
-            1.0
-        } else {
-            0.0
+        let amount = match state {
+            ElementState::Pressed => 1.0,
+            ElementState::Released => 0.0,
         };
+
         match key {
             PhysicalKey::Code(KeyCode::KeyW) | PhysicalKey::Code(KeyCode::ArrowUp) => {
                 self.amount_forward = amount;
@@ -300,14 +280,6 @@ impl CameraController {
         self.rotate_vertical = mouse_dy as f32;
     }
 
-    pub fn process_scroll(&mut self, delta: &MouseScrollDelta) {
-        self.scroll = -match delta {
-            // I'm assuming a line is about 100 pixels
-            MouseScrollDelta::LineDelta(_, scroll) => scroll * 100.0,
-            MouseScrollDelta::PixelDelta(PhysicalPosition { y: scroll, .. }) => *scroll as f32,
-        };
-    }
-
     pub fn update_camera(&mut self, camera: &mut Camera, dt: Duration) {
         let dt = dt.as_secs_f32();
 
@@ -316,16 +288,28 @@ impl CameraController {
         let forward = Vector3::new(yaw_cos, 0.0, yaw_sin).normalize();
         let right = Vector3::new(-yaw_sin, 0.0, yaw_cos).normalize();
 
-        camera.velocity = Vector3::new(0.0, camera.velocity.y, 0.0);
-        camera.velocity += forward * (self.amount_forward - self.amount_backward) * self.speed;
-        camera.velocity += right * (self.amount_right - self.amount_left) * self.speed;
+        let velocity = &mut camera.physics_state.velocity;
+
+        // this is a bad stand in for friction but feels vageuly correct
+        if camera.physics_state.grounded == Grounded::Yes {
+            velocity.x *= 0.8;
+            velocity.z *= 0.8;
+        }
+
+        // jump scaling 
+        let jump_scaling = if camera.physics_state.grounded == Grounded::No { 0.2 } else { 1.0 };
+
+        *velocity += forward * (self.amount_forward - self.amount_backward) * self.acceleration * dt * jump_scaling;
+        // apply friction
+        *velocity += right * (self.amount_right - self.amount_left) * self.acceleration * dt * jump_scaling;
         // clamp velocity to max speed
-        camera.velocity.x = camera.velocity.x.clamp(-self.speed, self.speed);
-        camera.velocity.z = camera.velocity.z.clamp(-self.speed, self.speed);
+        velocity.x = velocity.x.clamp(-self.speed, self.speed);
+        velocity.z = velocity.z.clamp(-self.speed, self.speed);
 
         // Move up/down. Since we don't use roll, we can just
-        // modify the y coordinate directly.
-        camera.velocity.y += self.amount_up * self.jump_velocity * dt;
+        if self.amount_up > 0.0 && camera.physics_state.grounded == Grounded::Yes && velocity.y < 0.1 {
+            velocity.y += self.amount_up * self.jump_velocity;
+        }
 
         // Rotate
         camera.yaw += Rad(self.rotate_horizontal) * self.sensitivity * dt;
@@ -347,19 +331,15 @@ impl CameraController {
 }
 
 impl KinematicBody for Camera {
-    fn velocity(&mut self) -> &mut Vector3<f32> {
-        &mut self.velocity
-    }
-
-    fn position(&mut self) -> &mut Point3<f32> {
-        &mut self.position
+    fn state(&mut self) -> &mut KinematicBodyState {
+        &mut self.physics_state
     }
 
     fn collider(&self) -> AabbBounds {
         // collider cube where camera origin is offset towards top of collider
         AabbBounds::new(
-            self.position - Vector3::new(0.4, 3., 0.4),
-            self.position + Vector3::new(0.4, 0., 0.4),
+            self.physics_state.position - Vector3::new(0.4, 3., 0.4),
+            self.physics_state.position + Vector3::new(0.4, 0., 0.4),
         )
     }
 }

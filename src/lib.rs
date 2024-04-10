@@ -185,7 +185,7 @@ impl CameraUniform {
     }
 
     fn update_view_proj(&mut self, camera: &Camera, projection: &Projection) {
-        self.view_position = camera.position.to_homogeneous().into();
+        self.view_position = camera.physics_state.position.to_homogeneous().into();
         self.view_proj = (projection.calc_matrix_opengl() * camera.calc_matrix()).into();
     }
 }
@@ -336,8 +336,8 @@ impl State {
 
         let camera = camera::Camera::new((9.5, 10.0, -11.27), cgmath::Deg(-90.), cgmath::Rad(-0.0));
         let projection =
-            camera::Projection::new(size.width, size.height, cgmath::Deg(67.0), 0.1, 100.);
-        let camera_controller = CameraController::new(6.0, 1.0, 20.0, 40.0);
+            camera::Projection::new(size.width, size.height, cgmath::Deg(67.0), 0.1, 1000.);
+        let camera_controller = CameraController::new(7., 1.0, GRAVITY * 1.2, 100.0);
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera, &projection);
 
@@ -532,10 +532,6 @@ impl State {
                 }
                 false
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                self.camera_controller.process_scroll(delta);
-                true
-            }
             WindowEvent::MouseInput {
                 button: MouseButton::Left,
                 state,
@@ -562,7 +558,7 @@ impl State {
         );
 
         // update loaded chunks based on camera position
-        let camera_pos = self.camera.position;
+        let camera_pos = self.camera.physics_state.position;
         let camera_chunk = (
             (camera_pos.x / (CHUNK_SIZE as f32 * BLOCK_SIZE)).floor() as i32,
             (camera_pos.z / (CHUNK_SIZE as f32 * BLOCK_SIZE)).floor() as i32,
@@ -752,11 +748,12 @@ impl State {
             },
             |ui| {
                 egui::Window::new("Debug").show(ui, |ui| {
-                    ui.label(format!("Camera Position: {:?}", self.camera.position));
+                    ui.label(format!("Camera Position: {:?}", self.camera.physics_state.position));
                     ui.label(format!("Chunks: {}", self.chunks.len()));
                     ui.label(format!("Instances: {}", self.instances.len()));
                     ui.label(format!("FPS: {:.2}", self.fps_tracker.get_fps()));
-                    ui.label(format!("Velocity: {:?}", self.camera.velocity));
+                    ui.label(format!("Velocity: {:?}", self.camera.physics_state.velocity));
+                    ui.label(format!("Grounded: {:?}", self.camera.physics_state.grounded));
                 });
             },
         );
