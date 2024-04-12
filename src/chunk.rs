@@ -2,17 +2,19 @@ use crate::{
     aabb::{Aabb, AabbBounds},
     block::{Block, BlockType, Render, BLOCK_SIZE},
     camera::Frustrum,
+    model::{self, Model, ModelVertex},
     Instance,
 };
 use cgmath::{prelude::*, Point3, Vector3};
 use log::info;
 use noise::NoiseFn;
+use wgpu::{hal::Device, util::DeviceExt};
 
 pub const CHUNK_SIZE: usize = 16;
 const NOISE_SCALE: f64 = 0.01;
 
 pub trait Chunk {
-    fn get_block(&self, x: u8, y: u8, z: u8) -> &Block;
+    fn get_block(&self, x: u8, y: u8, z: u8) -> Option<&Block>;
     fn get_block_mut(&mut self, x: u8, y: u8, z: u8) -> &mut Block;
     fn set_block(&mut self, x: u8, y: u8, z: u8, block: Block);
 }
@@ -59,7 +61,6 @@ impl Chunk16 {
                 // we are rendering chunk on the -1 y so we shift down by 1
                 let height =
                     noise.get([x as f64 * NOISE_SCALE, z as f64 * NOISE_SCALE]) * 16. + 8.0 - 16.0;
-                info!("height for {} {}: {}", x, z, height);
 
                 for y in self.origin.y * CHUNK_SIZE as i32..(self.origin.y + 1) * CHUNK_SIZE as i32
                 {
@@ -68,7 +69,6 @@ impl Chunk16 {
                         (y - self.origin.y * CHUNK_SIZE as i32) as u8,
                         (z - self.origin.z * CHUNK_SIZE as i32) as u8,
                     );
-                    info!("y: {}", y);
 
                     self.blocks[index].is_active = false;
 
@@ -110,6 +110,142 @@ impl Chunk16 {
         for c in candidates.iter_mut().skip(1) {
             c.0.is_selected = false;
         }
+    }
+
+    pub fn generate_mesh(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> anyhow::Result<model::Mesh> {
+        // we only need faces where there isn't a block butted up against it
+        let mut vertices: Vec<ModelVertex> = Vec::new();
+        let mut indices: Vec<u32> = Vec::new();
+        let faces: [Vector3<i8>; 6] = [
+            Vector3::new(1, 0, 0),
+            Vector3::new(-1, 0, 0),
+            Vector3::new(0, 1, 0),
+            Vector3::new(0, -1, 0),
+            Vector3::new(0, 0, 1),
+            Vector3::new(0, 0, -1),
+        ];
+        for (index, block) in self.blocks.iter().enumerate() {
+            info!("block: {:?}", block);
+            if !block.is_active {
+                continue;
+            }
+            // if this block isn't active, don't bother
+            // for each block face, test if there is a block next to that face, if there is we
+            // won't render this block and not add its vertices to the list
+            let (x, y, z) = Self::index_to_xyz(index);
+            for face in faces.iter() {
+                let (neighbor_x, neighbor_y, neighbhor_z) =
+                    (x as i8 + face.x, y as i8 + face.y, z as i8 + face.z);
+
+                // check we are in bounds first 
+                if neighbor_x >= 0
+                    && neighbor_x < CHUNK_SIZE as i8
+                    && neighbor_y >= 0
+                    && neighbor_y < CHUNK_SIZE as i8
+                    && neighbhor_z >= 0
+                    && neighbhor_z < CHUNK_SIZE as i8
+                {
+                    if let Some(neighbor) =
+                        self.get_block(neighbor_x as u8, neighbor_y as u8, neighbhor_z as u8)
+                    {
+                        // if there is an active neighbor on this face, skip it
+                        if neighbor.is_active {
+                            continue;
+                        }
+                    }
+                }
+                // else create a quad for this face
+
+                let (x, y, z) = (x as f32, y as f32, z as f32);
+                let offset = Vector3::<f32>::new(x, y, z) * BLOCK_SIZE;
+
+                let (x_normal, y_normal, z_normal) = (face.x, face.y, face.z);
+                let face_vertices: Vec<ModelVertex> = match (x_normal, y_normal, z_normal) {
+                    (1, 0, 0) => vec![
+                        [1.0, 1.0, -1.0],
+                        [1.0, 1.0, 1.0],
+                        [1.0, -1.0, 0.0],
+                        [1.0, -1.0, -1.0],
+                    ],
+                    (-1, 0, 0) => vec![
+                        [0.0, 1.0, 1.0],
+                        [0.0, 1.0, -1.0],
+                        [0.0, -1.0, -1.0],
+                        [0.0, -1.0, 1.0],
+                    ],
+                    (0, 1, 0) => vec![
+                        [1.0, 1.0, 1.0],
+                        [-1.0, 1.0, 1.0],
+                        [-1.0, 1.0, -1.0],
+                        [1.0, 1.0, -1.0],
+                    ],
+                    (0, -1, 0) => vec![
+                        [1.0, 0.0, -1.0],
+                        [-1.0, 0.0, -1.0],
+                        [-1.0, 0.0, 1.0],
+                        [1.0, 0.0, 1.0],
+                    ],
+                    (0, 0, 1) => vec![
+                        [1.0, 1.0, 1.0],
+                        [-1.0, 1.0, 1.0],
+                        [-1.0, -1.0, 1.0],
+                        [1.0, -1.0, 1.0],
+                    ],
+                    (0, 0, -1) => vec![
+                        [1.0, -1.0, -1.0],
+                        [-1.0, -1.0, -1.0],
+                        [-1.0, 1.0, -1.0],
+                        [1.0, 1.0, -1.0],
+                    ],
+                    _ => panic!("Invalid face"),
+                }
+                .iter()
+                .map(|v| {
+                    ModelVertex::new(
+                        [v[0] + offset.x, v[1] + offset.y, v[2] + offset.z],
+                        [x_normal as f32, y_normal as f32, z_normal as f32],
+                    )
+                })
+                .collect();
+
+                vertices.extend(face_vertices);
+                let start_index = vertices.len() as u32 - 4;
+                indices.extend_from_slice(&[
+                    start_index,
+                    start_index + 1,
+                    start_index + 2,
+                    start_index + 2,
+                    start_index + 3,
+                    start_index,
+                ]);
+            }
+        }
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Index Buffer"),
+            contents: bytemuck::cast_slice(&indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        Ok(model::Mesh {
+            name: format!(
+                "chunk_{}_{}_{}",
+                self.origin.x, self.origin.y, self.origin.z
+            ),
+            vertex_buffer,
+            index_buffer,
+            num_elements: indices.len() as u32,
+        })
     }
 }
 
@@ -172,7 +308,7 @@ impl Chunk16 {
                     self.get_block(x, y, z + 1),
                     self.get_block(x, y, z - 1),
                 ];
-                !neighbors.iter().all(|n| n.is_active) // all neighbors are active, so this block is occluded, return false
+                !neighbors.iter().all(|n| n.unwrap().is_active) // all neighbors are active, so this block is occluded, return false
             })
             .map(|(_, block)| Instance {
                 position: block.origin,
@@ -185,9 +321,9 @@ impl Chunk16 {
 }
 
 impl Chunk for Chunk16 {
-    fn get_block(&self, x: u8, y: u8, z: u8) -> &Block {
+    fn get_block(&self, x: u8, y: u8, z: u8) -> Option<&Block> {
         let index = Self::xyz_to_index(x, y, z);
-        &self.blocks[index]
+        self.blocks.get(index)
     }
 
     fn get_block_mut(&mut self, x: u8, y: u8, z: u8) -> &mut Block {

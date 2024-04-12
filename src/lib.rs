@@ -11,13 +11,13 @@ use std::{
 use block::{BlockType, BLOCK_SIZE};
 use camera::{Camera, CameraController, Projection};
 use cgmath::prelude::*;
-use chunk::CHUNK_SIZE;
+use chunk::{Chunk, CHUNK_SIZE};
 use egui_renderer::EguiRenderer;
 use egui_wgpu::ScreenDescriptor;
 use fps::Fps;
 use light::LightUniform;
 use log::{debug, info};
-use model::{DrawLight, DrawModel, ModelVertex};
+use model::{DrawLight, DrawModel, Mesh, Model, ModelVertex};
 use noise::{Fbm, Simplex};
 use notify::{event::ModifyKind, RecommendedWatcher, RecursiveMode, Watcher};
 use wgpu::util::DeviceExt;
@@ -31,22 +31,20 @@ use winit::{
     window::WindowBuilder,
 };
 
-use crate::{
-    block::Render, chunk::Chunk16,  model::Vertex, resources::load_texture,
-};
+use crate::{block::Render, chunk::Chunk16, model::Vertex, resources::load_texture};
 
 mod aabb;
 mod block;
 mod camera;
 mod chunk;
 mod egui_renderer;
+mod fps;
 mod light;
 mod model;
+mod physics;
 mod resources;
 mod texture;
 mod voxel;
-mod physics;
-mod fps;
 
 const CHUNK_RENDER_DISTANCE: i32 = 1;
 pub const GRAVITY: f32 = 9.8;
@@ -222,10 +220,11 @@ struct State {
     file_watcher: FileWatcher,
     mouse_pressed: bool,
     noise: Fbm<Simplex>,
+    chunk: Model,
     wireframe: Wireframe,
     render_pipeline_dirty: bool,
     egui_renderer: EguiRenderer,
-    fps_tracker: Fps
+    fps_tracker: Fps,
 }
 
 #[derive(Clone)]
@@ -376,7 +375,6 @@ impl State {
 
         let (light_bind_group_layout, light_bind_group, light_buffer, light_uniform) =
             light::setup(&device).await;
-        // lib.rs
         let light_render_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Light Pipeline Layout"),
@@ -442,6 +440,8 @@ impl State {
         let obj_model = voxel::load_block(&device, &queue).unwrap();
         let noise = Fbm::<Simplex>::new(0);
 
+        let chunk = Chunk16::new(0, -1, 0).generate(&noise);
+
         let egui_renderer = EguiRenderer::new(
             &device,       // wgpu Device
             config.format, // wgpu TextureFormat
@@ -449,6 +449,8 @@ impl State {
             1,             // samples
             &window,       // winit Window
         );
+
+        let chunk_mesh = chunk.generate_mesh(&device, &queue).unwrap();
 
         Self {
             window,
@@ -466,6 +468,10 @@ impl State {
             camera_buffer,
             projection,
             camera_bind_group,
+            chunk: Model {
+                meshes: vec![chunk_mesh],
+                materials: vec![],
+            },
             light_buffer,
             light_uniform,
             instances: vec![],
@@ -547,7 +553,6 @@ impl State {
     fn update(&mut self, dt: std::time::Duration) {
         self.camera_controller.update_camera(&mut self.camera, dt);
         physics::update_body(&mut self.camera, &self.chunks, dt);
-
 
         self.camera_uniform
             .update_view_proj(&self.camera, &self.projection);
@@ -726,9 +731,17 @@ impl State {
             );
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(2, &self.diffuse_bind_group, &[]);
+            /*
             render_pass.draw_model_instanced(
                 &self.obj_model,
                 0..self.instances.len() as u32,
+                &self.camera_bind_group,
+                &self.light_bind_group,
+            ); */
+
+            render_pass.draw_model_instanced(
+                &self.chunk,
+                0..1,
                 &self.camera_bind_group,
                 &self.light_bind_group,
             );
@@ -748,16 +761,24 @@ impl State {
             },
             |ui| {
                 egui::Window::new("Debug").show(ui, |ui| {
-                    ui.label(format!("Camera Position: {:?}", self.camera.physics_state.position));
+                    ui.label(format!(
+                        "Camera Position: {:?}",
+                        self.camera.physics_state.position
+                    ));
                     ui.label(format!("Chunks: {}", self.chunks.len()));
                     ui.label(format!("Instances: {}", self.instances.len()));
                     ui.label(format!("FPS: {:.2}", self.fps_tracker.get_fps()));
-                    ui.label(format!("Velocity: {:?}", self.camera.physics_state.velocity));
-                    ui.label(format!("Grounded: {:?}", self.camera.physics_state.grounded));
+                    ui.label(format!(
+                        "Velocity: {:?}",
+                        self.camera.physics_state.velocity
+                    ));
+                    ui.label(format!(
+                        "Grounded: {:?}",
+                        self.camera.physics_state.grounded
+                    ));
                 });
             },
         );
-
 
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
@@ -843,8 +864,7 @@ fn create_render_pipeline(
 
 pub async fn run() {
     let event_loop = EventLoop::new().unwrap();
-    let window = WindowBuilder::new()
-        .build(&event_loop).unwrap();
+    let window = WindowBuilder::new().build(&event_loop).unwrap();
 
     let file_watcher = FileWatcher::default();
 
