@@ -211,6 +211,7 @@ impl Chunk16 {
                     ModelVertex::new(
                         [v[0] + offset.x, v[1] + offset.y, v[2] + offset.z],
                         [x_normal as f32, y_normal as f32, z_normal as f32],
+                        0
                     )
                 })
                 .collect();

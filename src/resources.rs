@@ -96,6 +96,7 @@ pub async fn load_model(
                         m.mesh.normals[i * 3 + 1],
                         m.mesh.normals[i * 3 + 2],
                     ],
+                    texture_index: 1
                 })
                 .collect::<Vec<_>>();
 

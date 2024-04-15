@@ -12,16 +12,17 @@ pub trait Vertex {
 pub struct ModelVertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
+    pub texture_index: u32,
 }
 
 impl ModelVertex { 
-    pub fn new(position: [f32; 3], normal: [f32; 3]) -> Self {
-        Self { position, normal }
+    pub fn new(position: [f32; 3], normal: [f32; 3], texture_index: u32) -> Self {
+        Self { position, normal, texture_index }
     }
 }
 
-const ATTRIBS: [wgpu::VertexAttribute; 2] =
-    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
+const ATTRIBS: [wgpu::VertexAttribute; 3] =
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Uint32];
 
 impl Vertex for ModelVertex {
     fn desc() -> wgpu::VertexBufferLayout<'static> {

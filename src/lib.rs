@@ -44,7 +44,6 @@ mod model;
 mod physics;
 mod resources;
 mod texture;
-mod voxel;
 
 const CHUNK_RENDER_DISTANCE: i32 = 1;
 pub const GRAVITY: f32 = 9.8;
@@ -212,7 +211,6 @@ struct State {
     // The window must be declared after the surface so
     // it gets dropped after it as the surface contains
     // unsafe references to the window's resources.
-    obj_model: model::Model,
     window: Window,
     chunks: Vec<Chunk16>,
     file_watcher: FileWatcher,
@@ -427,7 +425,6 @@ impl State {
         //window.set_cursor_visible(false);
         const TOTAL_CHUNKS: i32 = (CHUNK_RENDER_DISTANCE * 2 + 1) * (CHUNK_RENDER_DISTANCE * 2 + 1);
 
-        let obj_model = voxel::load_block(&device, &queue).unwrap();
         let noise = Fbm::<Simplex>::new(0);
 
         let chunk = Chunk16::new(0, -1, 0).generate(&noise);
@@ -465,7 +462,6 @@ impl State {
             light_buffer,
             light_uniform,
             light_bind_group,
-            obj_model,
             light_render_pipeline,
             camera,
             camera_controller,
@@ -688,13 +684,6 @@ impl State {
                 timestamp_writes: None,
             });
 
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_pipeline(&self.light_render_pipeline);
-            render_pass.draw_light_model(
-                &self.obj_model,
-                &self.camera_bind_group,
-                &self.light_bind_group,
-            );
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(2, &self.diffuse_bind_group, &[]);
             /*
