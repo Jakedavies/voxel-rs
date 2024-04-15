@@ -13,7 +13,7 @@ use winit::{
 };
 
 use crate::aabb::{Aabb, AabbBounds};
-use crate::physics::{CubeCollider, Grounded, KinematicBody, KinematicBodyState};
+use crate::physics::{CubeCollider, KinematicBody, KinematicBodyState};
 use crate::GRAVITY;
 
 #[rustfmt::skip]
@@ -123,35 +123,58 @@ impl Camera {
         let matrix = projection.calc_matrix_opengl() * self.calc_matrix();
 
         let plane_right = Plane {
-            normal: Vector3::new(matrix[0][3] - matrix[0][0], matrix[1][3] - matrix[1][0], matrix[2][3] - matrix[2][0]),
+            normal: Vector3::new(
+                matrix[0][3] - matrix[0][0],
+                matrix[1][3] - matrix[1][0],
+                matrix[2][3] - matrix[2][0],
+            ),
             distance: matrix[3][3] - matrix[3][0],
         };
 
         let plane_left = Plane {
-            normal: Vector3::new(matrix[0][3] + matrix[0][0], matrix[1][3] + matrix[1][0], matrix[2][3] + matrix[2][0]),
+            normal: Vector3::new(
+                matrix[0][3] + matrix[0][0],
+                matrix[1][3] + matrix[1][0],
+                matrix[2][3] + matrix[2][0],
+            ),
             distance: matrix[3][3] + matrix[3][0],
         };
 
         let plane_bottom = Plane {
-            normal: Vector3::new(matrix[0][3] + matrix[0][1], matrix[1][3] + matrix[1][1], matrix[2][3] + matrix[2][1]),
+            normal: Vector3::new(
+                matrix[0][3] + matrix[0][1],
+                matrix[1][3] + matrix[1][1],
+                matrix[2][3] + matrix[2][1],
+            ),
             distance: matrix[3][3] + matrix[3][1],
         };
 
         let plane_top = Plane {
-            normal: Vector3::new(matrix[0][3] - matrix[0][1], matrix[1][3] - matrix[1][1], matrix[2][3] - matrix[2][1]),
+            normal: Vector3::new(
+                matrix[0][3] - matrix[0][1],
+                matrix[1][3] - matrix[1][1],
+                matrix[2][3] - matrix[2][1],
+            ),
             distance: matrix[3][3] - matrix[3][1],
         };
 
         let plane_near = Plane {
-            normal: Vector3::new(matrix[0][3] + matrix[0][2], matrix[1][3] + matrix[1][2], matrix[2][3] + matrix[2][2]),
+            normal: Vector3::new(
+                matrix[0][3] + matrix[0][2],
+                matrix[1][3] + matrix[1][2],
+                matrix[2][3] + matrix[2][2],
+            ),
             distance: matrix[3][3] + matrix[3][2],
         };
 
         let plane_far = Plane {
-            normal: Vector3::new(matrix[0][3] - matrix[0][2], matrix[1][3] - matrix[1][2], matrix[2][3] - matrix[2][2]),
+            normal: Vector3::new(
+                matrix[0][3] - matrix[0][2],
+                matrix[1][3] - matrix[1][2],
+                matrix[2][3] - matrix[2][2],
+            ),
             distance: matrix[3][3] - matrix[3][2],
         };
-
 
         Frustrum {
             top: plane_top,
@@ -291,24 +314,35 @@ impl CameraController {
         let velocity = &mut camera.physics_state.velocity;
 
         // this is a bad stand in for friction but feels vageuly correct
-        if camera.physics_state.grounded == Grounded::Yes {
-            velocity.x *= 0.8;
-            velocity.z *= 0.8;
-        }
+        let jump_scaling = if !camera.physics_state.grounded {
+            0.2
+        } else {
+            1.0
+        };
 
-        // jump scaling 
-        let jump_scaling = if camera.physics_state.grounded == Grounded::No { 0.2 } else { 1.0 };
-
-        *velocity += forward * (self.amount_forward - self.amount_backward) * self.acceleration * dt * jump_scaling;
-        // apply friction
-        *velocity += right * (self.amount_right - self.amount_left) * self.acceleration * dt * jump_scaling;
+        *velocity += forward
+            * (self.amount_forward - self.amount_backward)
+            * self.acceleration
+            * dt
+            * jump_scaling;
+        *velocity +=
+            right * (self.amount_right - self.amount_left) * self.acceleration * dt * jump_scaling;
         // clamp velocity to max speed
         velocity.x = velocity.x.clamp(-self.speed, self.speed);
         velocity.z = velocity.z.clamp(-self.speed, self.speed);
 
-        // Move up/down. Since we don't use roll, we can just
-        if self.amount_up > 0.0 && camera.physics_state.grounded == Grounded::Yes && velocity.y < 0.1 {
+        // Jumping
+        if self.amount_up > 0.0 && camera.physics_state.grounded && velocity.y < 0.1 {
             velocity.y += self.amount_up * self.jump_velocity;
+        }
+
+        // If we are not getting any input, quickly slow down the camera
+        if self.amount_forward == 0.0
+            && self.amount_backward == 0.0
+            && camera.physics_state.grounded
+        {
+            velocity.x *= 0.8;
+            velocity.z *= 0.8;
         }
 
         // Rotate

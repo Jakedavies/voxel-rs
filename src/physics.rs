@@ -11,17 +11,11 @@ use crate::{
 
 const GRAVITY: f32 = 9.8 * 2.0; // our blocks are 2.0 wide, gravity feels funky unless scaled
 
-#[derive(Debug, PartialEq)]
-pub enum Grounded {
-    Yes,
-    No,
-}
-
 #[derive(Debug)]
 pub struct KinematicBodyState {
     pub velocity: cgmath::Vector3<f32>,
     pub position: cgmath::Point3<f32>,
-    pub grounded: Grounded,
+    pub grounded: bool,
 }
 
 impl KinematicBodyState {
@@ -29,7 +23,7 @@ impl KinematicBodyState {
         Self {
             velocity: cgmath::Vector3::new(0.0, 0.0, 0.0),
             position: cgmath::Point3::new(0.0, 0.0, 0.0),
-            grounded: Grounded::No,
+            grounded: false,
         }
     }
 }
@@ -151,12 +145,12 @@ pub fn update_body<'a>(
     grounded_collider.min.y -= 0.05;
     if let Some(collision_vector) = collide_chunks(chunks, &grounded_collider) {
         if collision_vector.y != 0.0 {
-            physics_state.grounded = Grounded::Yes;
+            physics_state.grounded = true;
         } else {
-            physics_state.grounded = Grounded::No;
+            physics_state.grounded = false;
         }
     } else {
-        physics_state.grounded = Grounded::No;
+        physics_state.grounded = false;
     }
 }
 

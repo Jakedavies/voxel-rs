@@ -47,7 +47,7 @@ mod resources;
 mod texture;
 mod chunk_manager;
 
-const CHUNK_RENDER_DISTANCE: i32 = 10;
+const CHUNK_RENDER_DISTANCE: i32 = 12;
 pub const GRAVITY: f32 = 9.8;
 pub const ROTATE_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0., 0.0, 0.0, 0.0, 0.0, 1.0,
@@ -111,6 +111,7 @@ struct State {
     render_pipeline_dirty: bool,
     egui_renderer: EguiRenderer,
     fps_tracker: Fps,
+    ready: bool,
 }
 
 #[derive(Clone)]
@@ -219,7 +220,7 @@ impl State {
 
         let (texture_bind_group_layout, diffuse_bind_group) = texture::setup(&device, &queue).await;
 
-        let camera = camera::Camera::new((9.5, 10.0, -11.27), cgmath::Deg(-90.), cgmath::Rad(-0.0));
+        let camera = camera::Camera::new((9.5, 50.0, -11.27), cgmath::Deg(-90.), cgmath::Rad(-0.0));
         let projection =
             camera::Projection::new(size.width, size.height, cgmath::Deg(67.0), 0.1, 1000.);
         let camera_controller = CameraController::new(7., 1.0, GRAVITY * 1.2, 100.0);
@@ -310,11 +311,7 @@ impl State {
             )
         };
 
-        //window.set_cursor_visible(false);
-        const TOTAL_CHUNKS: i32 = (CHUNK_RENDER_DISTANCE * 2 + 1) * (CHUNK_RENDER_DISTANCE * 2 + 1);
-
         let noise = Fbm::<Simplex>::new(0);
-
 
         let egui_renderer = EguiRenderer::new(
             &device,       // wgpu Device
@@ -356,6 +353,7 @@ impl State {
             wireframe,
             render_pipeline_dirty: false,
             fps_tracker: Fps::new(120),
+            ready: false,
         }
     }
 
@@ -419,6 +417,13 @@ impl State {
 
     fn update(&mut self, dt: std::time::Duration) {
         self.camera_controller.update_camera(&mut self.camera, dt);
+
+        /**
+        physics::cast_ray(
+            &self.camera,
+            self.chunk_manager.loaded_chunks.values().map(|chunk| &chunk.chunk),
+        ); */
+
         physics::update_body(
             &mut self.camera, 
             self.chunk_manager.loaded_chunks.values().map(|chunk| &chunk.chunk),
@@ -453,6 +458,7 @@ impl State {
             0,
             bytemuck::cast_slice(&[self.light_uniform]),
         );
+
         // Force cursor back to middle
         if self.window.has_focus() {
             self.window
@@ -540,13 +546,6 @@ impl State {
 
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(2, &self.diffuse_bind_group, &[]);
-            /*
-            render_pass.draw_model_instanced(
-                &self.obj_model,
-                0..self.instances.len() as u32,
-                &self.camera_bind_group,
-                &self.light_bind_group,
-            ); */
 
             for chunk in self.chunk_manager.loaded_chunks.values() {
                 render_pass.draw_mesh_instanced(
@@ -700,7 +699,7 @@ pub async fn run() {
         .unwrap();
 
     let mut state = State::new(window, file_watcher).await;
-    let mut last_render_time = Instant::now();
+    let mut last_render_time = None;
 
     event_loop
         .run(move |event, elwt| match event {
@@ -721,8 +720,8 @@ pub async fn run() {
             } if window_id == state.window.id() && !state.input(event) => match event {
                 WindowEvent::RedrawRequested if window_id == state.window().id() => {
                     let now = Instant::now();
-                    let dt = now - last_render_time;
-                    last_render_time = now;
+                    let dt = now - last_render_time.unwrap_or(now);
+                    last_render_time = Some(now);
                     state.update(dt);
                     match state.render() {
                         Ok(_) => {}
