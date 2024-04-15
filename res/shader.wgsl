@@ -1,17 +1,3 @@
-struct InstanceInput {
-    @location(5) model_matrix_0: vec4<f32>,
-    @location(6) model_matrix_1: vec4<f32>,
-    @location(7) model_matrix_2: vec4<f32>,
-    @location(8) model_matrix_3: vec4<f32>,
-
-    @location(9) normal_matrix_0: vec3<f32>,
-    @location(10) normal_matrix_1: vec3<f32>,
-    @location(11) normal_matrix_2: vec3<f32>,
-
-    // Block data
-    @location(12) block_data_0: u32,
-};
-
 // Vertex shader
 struct CameraUniform {
     view_proj: mat4x4<f32>,
@@ -43,7 +29,6 @@ struct VertexOutput {
 @vertex
 fn vs_main(
     model: VertexInput,
-    instance: InstanceInput,
 ) -> VertexOutput {
 
     var out: VertexOutput;
@@ -52,7 +37,7 @@ fn vs_main(
     var world_position: vec4<f32> = vec4<f32>(model.position, 1.0);
     out.world_position = world_position.xyz;
     out.clip_position = camera.view_proj * world_position;
-    out.block_data_0 = instance.block_data_0;
+    out.block_data_0 = 0x00000000u;
     out.position = model.position;
     out.normal = model.normal;
 
@@ -102,7 +87,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let texture_offset = 1.0 / 16.0;
     let total_offset = texture_position * texture_offset;
-    let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, vec2<f32>(corrected_position.x / 16.0 + total_offset.x, corrected_position.y / 16.0 + total_offset.y));
+    //let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, vec2<f32>(corrected_position.x / 16.0 + total_offset.x, corrected_position.y / 16.0 + total_offset.y));
+    
+    // color from uv only 
+    let object_color: vec4<f32> = vec4<f32>((uv.x) % 2.0, 0.0, (uv.y) % 2.0, 1.0); 
     
     // We don't need (or want) much ambient light, so 0.1 is fine
     var ambient_strength = 0.2;

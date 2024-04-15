@@ -209,8 +209,6 @@ struct State {
     light_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
     diffuse_bind_group: wgpu::BindGroup,
-    instance_buffer: wgpu::Buffer,
-    instances: Vec<Instance>,
     // The window must be declared after the surface so
     // it gets dropped after it as the surface contains
     // unsafe references to the window's resources.
@@ -418,7 +416,7 @@ impl State {
                 &render_pipeline_layout,
                 config.format,
                 Some(texture::Texture::DEPTH_FORMAT),
-                &[model::ModelVertex::desc(), InstanceRaw::desc()],
+                &[model::ModelVertex::desc()],
                 shader,
                 &wireframe,
             )
@@ -428,14 +426,6 @@ impl State {
 
         //window.set_cursor_visible(false);
         const TOTAL_CHUNKS: i32 = (CHUNK_RENDER_DISTANCE * 2 + 1) * (CHUNK_RENDER_DISTANCE * 2 + 1);
-        const EXPECTED_INSTANCE_COUNT: i32 = 16 * 16 * 16 * TOTAL_CHUNKS;
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(
-                &[InstanceRaw::default(); EXPECTED_INSTANCE_COUNT as usize],
-            ),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
 
         let obj_model = voxel::load_block(&device, &queue).unwrap();
         let noise = Fbm::<Simplex>::new(0);
@@ -474,8 +464,6 @@ impl State {
             },
             light_buffer,
             light_uniform,
-            instances: vec![],
-            instance_buffer,
             light_bind_group,
             obj_model,
             light_render_pipeline,
@@ -598,29 +586,9 @@ impl State {
             }
         }
 
-        let frustrum = self.camera.frustrum(&self.projection);
         // if a chunk has updated, update the instance data buffer
         if dirty {
-            self.instances = self
-                .chunks
-                .iter()
-                .flat_map(|c| c.culled_render(&frustrum))
-                //.flat_map(|c| c.render())
-                .collect::<Vec<_>>();
 
-            log::info!("Instances: {}", self.instances.len());
-
-            let instance_data = self
-                .instances
-                .iter()
-                .map(Instance::to_raw)
-                .collect::<Vec<_>>();
-
-            self.queue.write_buffer(
-                &self.instance_buffer,
-                0,
-                bytemuck::cast_slice(&instance_data),
-            );
         }
 
         // Update the light
@@ -664,7 +632,7 @@ impl State {
                     &self.render_pipeline_layout,
                     self.config.format,
                     Some(texture::Texture::DEPTH_FORMAT),
-                    &[model::ModelVertex::desc(), InstanceRaw::desc()],
+                    &[model::ModelVertex::desc()],
                     shader,
                     &self.wireframe,
                 );
@@ -721,8 +689,6 @@ impl State {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
-
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_pipeline(&self.light_render_pipeline);
             render_pass.draw_light_model(
                 &self.obj_model,
@@ -766,7 +732,6 @@ impl State {
                         self.camera.physics_state.position
                     ));
                     ui.label(format!("Chunks: {}", self.chunks.len()));
-                    ui.label(format!("Instances: {}", self.instances.len()));
                     ui.label(format!("FPS: {:.2}", self.fps_tracker.get_fps()));
                     ui.label(format!(
                         "Velocity: {:?}",
