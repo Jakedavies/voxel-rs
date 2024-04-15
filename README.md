@@ -7,19 +7,18 @@ Initial rendering code based on the fantastic [Learn WGPU tutorial series](https
 
 ### Status as of Feb 19 2024
 
-![Feb 19, 2024 Progress](/progress/2024-02-19_21-40.png)
+![April 15, 2024 Progress](/progress/2024-04-15_23-52.png)
 
 - Voxel based rendering works.
-- Mapping of textures based on block type in shader using texture atlas.
 - Dynamic chunk loading based on camera position
 - Basic procedural chunk generation using open simplex noise and height based block selection.
-- Basic camera controller, with gravity. Arbitrary floor at y = 32.
+- Basic player controller
+- Block type to texture atlas mapping with shader
+- Chunk based meshing
+- Something resembling a physics engine
 
 ### TODO
 In no particular order, here are some future items to look into.
-
-- Greedy mesh optimization rather than drawing 4096 voxel instances for each chunk.
-- Basic physics system
 - Block destruction, placement
 - Block drops
 - Seeded RNG

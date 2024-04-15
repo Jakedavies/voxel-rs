@@ -76,8 +76,10 @@ impl Aabb for CubeCollider {
 }
 
 // this function will take a list of chunks and a cube collider and return the reverse direction of the collision
-fn collide_chunks<'a>(chunks: impl Iterator<Item = &'a Chunk16>, collision_body: &impl Aabb) ->
-Option<cgmath::Vector3<f32>> {
+fn collide_chunks<'a>(
+    chunks: impl Iterator<Item = &'a Chunk16>,
+    collision_body: &impl Aabb,
+) -> Option<cgmath::Vector3<f32>> {
     // build an aabb from the current position and future position to prune chunks
     // test this larger aabb against all the chunks to see if any are relevant
     let blocks = chunks
@@ -90,7 +92,6 @@ Option<cgmath::Vector3<f32>> {
     // for each intersection axis, take the max reverse direction
     for block in blocks {
         if let Some(collision_info) = collision_body.aabb().intersection(&block.aabb()) {
-            info!("collision info: {:?}", collision_info);
             // abs value of penetration in each axis
             if collision_info.vector().x.abs() > collision_reverse.x.abs() {
                 collision_reverse.x = collision_info.vector().x;
@@ -101,21 +102,21 @@ Option<cgmath::Vector3<f32>> {
             if collision_info.vector().z.abs() > collision_reverse.z.abs() {
                 collision_reverse.z = collision_info.vector().z;
             }
-        } else {
-            info!("no collision info");
         }
     }
 
     Some(collision_reverse)
 }
 
-pub fn update_body<'a>(body: &mut impl KinematicBody, chunks: impl Iterator<Item = &'a Chunk16> + Clone, dt: Duration) {
+pub fn update_body<'a>(
+    body: &mut impl KinematicBody,
+    chunks: impl Iterator<Item = &'a Chunk16> + Clone,
+    dt: Duration,
+) {
     {
         let physics_state = body.state();
         // apply gravity to velocity
         physics_state.velocity.y -= GRAVITY * dt.as_secs_f32();
-
-        
 
         // apply velocity to position
         physics_state.position.x += physics_state.velocity.x * dt.as_secs_f32();

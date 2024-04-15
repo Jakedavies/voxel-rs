@@ -47,7 +47,7 @@ mod resources;
 mod texture;
 mod chunk_manager;
 
-const CHUNK_RENDER_DISTANCE: i32 = 2;
+const CHUNK_RENDER_DISTANCE: i32 = 10;
 pub const GRAVITY: f32 = 9.8;
 pub const ROTATE_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0., 0.0, 0.0, 0.0, 0.0, 1.0,

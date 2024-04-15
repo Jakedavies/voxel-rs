@@ -232,7 +232,6 @@ impl Chunk16 {
             }
         }
 
-        info!("initializing buffers");
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             contents: bytemuck::cast_slice(&vertices),

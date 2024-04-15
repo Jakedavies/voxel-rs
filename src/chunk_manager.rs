@@ -2,12 +2,8 @@ use std::collections::HashMap;
 
 use log::info;
 use noise::NoiseFn;
-use wgpu::Device;
 
-use crate::{
-    chunk::{Chunk16, ChunkWithMesh},
-    State,
-};
+use crate::chunk::{Chunk16, ChunkWithMesh};
 
 pub struct ChunkManager {
     pub loaded_chunks: HashMap<(i32, i32, i32), ChunkWithMesh>,
