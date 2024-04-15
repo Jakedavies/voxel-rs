@@ -5,7 +5,7 @@ Voxel renderer in Rust, mostly to learn about lower level graphics programming, 
 Initial rendering code based on the fantastic [Learn WGPU tutorial series](https://sotrh.github.io/learn-wgpu/).
 
 
-### Status as of Feb 19 2024
+### Status as of April 15 2024
 
 ![April 15, 2024 Progress](/progress/2024-04-15_23-52.png)
 
