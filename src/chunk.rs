@@ -1,9 +1,8 @@
 use crate::{
     aabb::{Aabb, AabbBounds},
-    block::{Block, BlockType, Render, BLOCK_SIZE},
+    block::{Block, BlockType, BLOCK_SIZE},
     camera::Frustrum,
     model::{self, Model, ModelVertex},
-    Instance,
 };
 use cgmath::{prelude::*, Point3, Vector3};
 use log::info;
@@ -22,6 +21,11 @@ pub trait Chunk {
 pub struct Chunk16 {
     pub origin: cgmath::Point3<i32>,
     pub blocks: [Block; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE],
+}
+
+pub struct ChunkWithMesh {
+    pub chunk: Chunk16,
+    pub mesh: model::Mesh,
 }
 
 impl Chunk16 {
@@ -113,10 +117,10 @@ impl Chunk16 {
     }
 
     pub fn generate_mesh(
-        &self,
+        self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> anyhow::Result<model::Mesh> {
+    ) -> anyhow::Result<ChunkWithMesh> {
         // we only need faces where there isn't a block butted up against it
         let mut vertices: Vec<ModelVertex> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
@@ -129,7 +133,6 @@ impl Chunk16 {
             Vector3::new(0, 0, -1),
         ];
         for (index, block) in self.blocks.iter().enumerate() {
-            info!("block: {:?}", block);
             if !block.is_active {
                 continue;
             }
@@ -229,6 +232,7 @@ impl Chunk16 {
             }
         }
 
+        info!("initializing buffers");
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             contents: bytemuck::cast_slice(&vertices),
@@ -241,7 +245,7 @@ impl Chunk16 {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        Ok(model::Mesh {
+        let mesh = model::Mesh {
             name: format!(
                 "chunk_{}_{}_{}",
                 self.origin.x, self.origin.y, self.origin.z
@@ -249,26 +253,15 @@ impl Chunk16 {
             vertex_buffer,
             index_buffer,
             num_elements: indices.len() as u32,
+        };
+
+        Ok(ChunkWithMesh {
+            chunk: self,
+            mesh,
         })
     }
 }
 
-impl Render for Chunk16 {
-    fn render(&self) -> Vec<Instance> {
-        let chunk_offset = self.origin.cast::<f32>().unwrap() * BLOCK_SIZE * CHUNK_SIZE as f32;
-        self.blocks
-            .iter()
-            .enumerate()
-            .filter(|(index, block)| block.is_active)
-            .map(|(index, block)| Instance {
-                position: block.origin,
-                block_type: block.t,
-                is_selected: block.is_selected,
-                ..Default::default()
-            })
-            .collect()
-    }
-}
 
 impl Chunk16 {
     fn xyz_to_index(x: u8, y: u8, z: u8) -> usize {
@@ -283,6 +276,7 @@ impl Chunk16 {
         (x as u8, y as u8, z as u8)
     }
 
+    /*
     pub fn culled_render(&self, frustum: &Frustrum) -> Vec<Instance> {
         self.blocks
             .iter()
@@ -321,7 +315,7 @@ impl Chunk16 {
                 ..Default::default()
             })
             .collect()
-    }
+    } */
 }
 
 impl Chunk for Chunk16 {

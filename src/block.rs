@@ -1,7 +1,7 @@
 use cgmath::{ElementWise, Vector3, Point3};
 use log::info;
 
-use crate::{aabb::Aabb, Instance};
+use crate::{aabb::Aabb};
 
 pub const BLOCK_SIZE: f32 = 2.0;
 
@@ -54,10 +54,6 @@ impl Aabb for Block {
     fn max(&self) -> Point3<f32> {
         self.origin + Vector3::new(BLOCK_SIZE / 2.0, BLOCK_SIZE / 2.0, BLOCK_SIZE / 2.0)
     }
-}
-
-pub trait Render {
-    fn render(&self) -> Vec<Instance>;
 }
 
 

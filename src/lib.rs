@@ -11,7 +11,8 @@ use std::{
 use block::{BlockType, BLOCK_SIZE};
 use camera::{Camera, CameraController, Projection};
 use cgmath::prelude::*;
-use chunk::{Chunk, CHUNK_SIZE};
+use chunk::{Chunk, ChunkWithMesh, CHUNK_SIZE};
+use chunk_manager::ChunkManager;
 use egui_renderer::EguiRenderer;
 use egui_wgpu::ScreenDescriptor;
 use fps::Fps;
@@ -31,7 +32,7 @@ use winit::{
     window::WindowBuilder,
 };
 
-use crate::{block::Render, chunk::Chunk16, model::Vertex, resources::load_texture};
+use crate::{chunk::Chunk16, model::Vertex, resources::load_texture};
 
 mod aabb;
 mod block;
@@ -44,31 +45,10 @@ mod model;
 mod physics;
 mod resources;
 mod texture;
+mod chunk_manager;
 
-const CHUNK_RENDER_DISTANCE: i32 = 1;
+const CHUNK_RENDER_DISTANCE: i32 = 2;
 pub const GRAVITY: f32 = 9.8;
-
-pub struct Instance {
-    position: cgmath::Point3<f32>,
-    rotation: cgmath::Quaternion<f32>,
-    block_type: BlockType,
-    is_selected: bool,
-}
-
-impl Default for Instance {
-    fn default() -> Self {
-        Self {
-            position: cgmath::Point3::new(0.0, 0.0, 0.0),
-            rotation: cgmath::Quaternion::from_axis_angle(
-                cgmath::Vector3::unit_z(),
-                cgmath::Deg(0.0),
-            ),
-            block_type: BlockType::Dirt,
-            is_selected: false,
-        }
-    }
-}
-
 pub const ROTATE_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0., 0.0, 0.0, 0.0, 0.0, 1.0,
 );
@@ -123,11 +103,10 @@ struct State {
     // it gets dropped after it as the surface contains
     // unsafe references to the window's resources.
     window: Window,
-    chunks: Vec<Chunk16>,
+    chunk_manager: ChunkManager,
     file_watcher: FileWatcher,
     mouse_pressed: bool,
     noise: Fbm<Simplex>,
-    chunk: Model,
     wireframe: Wireframe,
     render_pipeline_dirty: bool,
     egui_renderer: EguiRenderer,
@@ -331,14 +310,11 @@ impl State {
             )
         };
 
-        let chunks = vec![];
-
         //window.set_cursor_visible(false);
         const TOTAL_CHUNKS: i32 = (CHUNK_RENDER_DISTANCE * 2 + 1) * (CHUNK_RENDER_DISTANCE * 2 + 1);
 
         let noise = Fbm::<Simplex>::new(0);
 
-        let chunk = Chunk16::new(0, -1, 0).generate(&noise);
 
         let egui_renderer = EguiRenderer::new(
             &device,       // wgpu Device
@@ -348,7 +324,7 @@ impl State {
             &window,       // winit Window
         );
 
-        let chunk_mesh = chunk.generate_mesh(&device, &queue).unwrap();
+        let chunk_manager = ChunkManager::new();
 
         Self {
             window,
@@ -357,7 +333,7 @@ impl State {
             device,
             queue,
             config,
-            chunks,
+            chunk_manager,
             size,
             bg_color: wgpu::Color::BLACK,
             render_pipeline,
@@ -366,10 +342,6 @@ impl State {
             camera_buffer,
             projection,
             camera_bind_group,
-            chunk: Model {
-                meshes: vec![chunk_mesh],
-                materials: vec![],
-            },
             light_buffer,
             light_uniform,
             light_bind_group,
@@ -447,7 +419,10 @@ impl State {
 
     fn update(&mut self, dt: std::time::Duration) {
         self.camera_controller.update_camera(&mut self.camera, dt);
-        physics::update_body(&mut self.camera, &self.chunks, dt);
+        physics::update_body(
+            &mut self.camera, 
+            self.chunk_manager.loaded_chunks.values().map(|chunk| &chunk.chunk),
+            dt);
 
         self.camera_uniform
             .update_view_proj(&self.camera, &self.projection);
@@ -461,42 +436,11 @@ impl State {
         let camera_pos = self.camera.physics_state.position;
         let camera_chunk = (
             (camera_pos.x / (CHUNK_SIZE as f32 * BLOCK_SIZE)).floor() as i32,
+            -1,
             (camera_pos.z / (CHUNK_SIZE as f32 * BLOCK_SIZE)).floor() as i32,
         );
 
-        let mut loaded = HashMap::<(i32, i32), bool>::new();
-        let mut dirty = false;
-        // unload oob chunks
-        self.chunks.retain(|c| {
-            let chunk_pos = c.origin;
-            let distance = (
-                (chunk_pos.x - camera_chunk.0).abs(),
-                (chunk_pos.z - camera_chunk.1).abs(),
-            );
-            if distance.0 > CHUNK_RENDER_DISTANCE || distance.1 > CHUNK_RENDER_DISTANCE {
-                false
-            } else {
-                loaded.insert((chunk_pos.x, chunk_pos.z), true);
-                dirty = true;
-                true
-            }
-        });
-
-        for x in -CHUNK_RENDER_DISTANCE..=CHUNK_RENDER_DISTANCE {
-            for z in -CHUNK_RENDER_DISTANCE..=CHUNK_RENDER_DISTANCE {
-                let chunk_pos = (camera_chunk.0 + x, camera_chunk.1 + z);
-                if loaded.contains_key(&chunk_pos) {
-                    continue;
-                }
-                let chunk = Chunk16::new(chunk_pos.0, -1, chunk_pos.1).generate(&self.noise);
-                self.chunks.push(chunk);
-            }
-        }
-
-        // if a chunk has updated, update the instance data buffer
-        if dirty {
-
-        }
+        self.chunk_manager.update_loaded_chunks(&self.noise, &self.device, &self.queue, camera_chunk, CHUNK_RENDER_DISTANCE);
 
         // Update the light
         let old_position: cgmath::Vector3<_> = self.light_uniform.position.into();
@@ -570,7 +514,6 @@ impl State {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
-
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -605,12 +548,14 @@ impl State {
                 &self.light_bind_group,
             ); */
 
-            render_pass.draw_model_instanced(
-                &self.chunk,
-                0..1,
-                &self.camera_bind_group,
-                &self.light_bind_group,
-            );
+            for chunk in self.chunk_manager.loaded_chunks.values() {
+                render_pass.draw_mesh_instanced(
+                    &chunk.mesh,
+                    0..1,
+                    &self.camera_bind_group,
+                    &self.light_bind_group,
+                );
+            }
         }
 
         self.fps_tracker.update(Instant::now());
@@ -631,7 +576,6 @@ impl State {
                         "Camera Position: {:?}",
                         self.camera.physics_state.position
                     ));
-                    ui.label(format!("Chunks: {}", self.chunks.len()));
                     ui.label(format!("FPS: {:.2}", self.fps_tracker.get_fps()));
                     ui.label(format!(
                         "Velocity: {:?}",

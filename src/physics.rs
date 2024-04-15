@@ -6,7 +6,7 @@ use wgpu::naga::Block;
 
 use crate::{
     aabb::{Aabb, AabbBounds},
-    chunk::Chunk16,
+    chunk::{Chunk16, ChunkWithMesh},
 };
 
 const GRAVITY: f32 = 9.8 * 2.0; // our blocks are 2.0 wide, gravity feels funky unless scaled
@@ -76,20 +76,17 @@ impl Aabb for CubeCollider {
 }
 
 // this function will take a list of chunks and a cube collider and return the reverse direction of the collision
-fn collide_chunks(chunks: &[Chunk16], collision_body: &impl Aabb) -> Option<cgmath::Vector3<f32>> {
+fn collide_chunks<'a>(chunks: impl Iterator<Item = &'a Chunk16>, collision_body: &impl Aabb) ->
+Option<cgmath::Vector3<f32>> {
     // build an aabb from the current position and future position to prune chunks
     // test this larger aabb against all the chunks to see if any are relevant
     let blocks = chunks
-        .iter()
-        .filter(|chunk| (*chunk).aabb().intersects(collision_body))
+        .filter(|chunk| chunk.aabb().intersects(collision_body))
         .flat_map(|chunk| chunk.blocks.iter())
         .filter(|block| block.aabb().intersects(collision_body))
         .filter(|block| block.is_active);
 
     let mut collision_reverse = cgmath::Vector3::new(0.0, 0.0, 0.0);
-    if blocks.clone().count() == 0 {
-        return None;
-    }
     // for each intersection axis, take the max reverse direction
     for block in blocks {
         if let Some(collision_info) = collision_body.aabb().intersection(&block.aabb()) {
@@ -112,7 +109,7 @@ fn collide_chunks(chunks: &[Chunk16], collision_body: &impl Aabb) -> Option<cgma
     Some(collision_reverse)
 }
 
-pub fn update_body(body: &mut impl KinematicBody, chunks: &[Chunk16], dt: Duration) {
+pub fn update_body<'a>(body: &mut impl KinematicBody, chunks: impl Iterator<Item = &'a Chunk16> + Clone, dt: Duration) {
     {
         let physics_state = body.state();
         // apply gravity to velocity
@@ -129,7 +126,7 @@ pub fn update_body(body: &mut impl KinematicBody, chunks: &[Chunk16], dt: Durati
     let collider = body.collider();
     let physics_state = body.state();
     // collide with chunks
-    if let Some(collision_vector) = collide_chunks(chunks, &collider) {
+    if let Some(collision_vector) = collide_chunks(chunks.clone(), &collider) {
         // zero out the velocity in the direction of the collision
         // update the position with the inverse of the collision
         if collision_vector.x != 0.0 {
