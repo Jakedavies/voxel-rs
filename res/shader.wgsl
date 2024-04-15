@@ -38,7 +38,7 @@ fn vs_main(
     var world_position: vec4<f32> = vec4<f32>(model.position, 1.0);
     out.world_position = world_position.xyz;
     out.clip_position = camera.view_proj * world_position;
-    out.block_data_0 = 0x00000000u;
+    out.block_data_0 = model.texture_index;
     out.position = model.position;
     out.normal = model.normal;
 
@@ -57,14 +57,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     if faceNormal.x > faceNormal.y && faceNormal.x > faceNormal.z {
         // (1, 0, 0) is the abs normal of the face
-        uv = in.position.zy;
+        uv = in.position.zy % 2.0;
     } else if faceNormal.y > faceNormal.x && faceNormal.y > faceNormal.z {
         // (0, 1, 0) is the abs normal of the face
-        uv = in.position.xz;
+        uv = in.position.xz % 2.0;
     } else {
         // (0, 0, 1) is the abs normal of the face
-        uv = in.position.xy;
+        uv = in.position.xy % 2.0;
     }
+    uv = uv / 2.0;
 
     let selected = in.block_data_0 & 0x00FF0000u;
 
@@ -88,10 +89,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let texture_offset = 1.0 / 16.0;
     let total_offset = texture_position * texture_offset;
-    //let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, vec2<f32>(corrected_position.x / 16.0 + total_offset.x, corrected_position.y / 16.0 + total_offset.y));
+    let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, vec2<f32>(corrected_position.x / 16.0 + total_offset.x, corrected_position.y / 16.0 + total_offset.y));
     
     // color from uv only 
-    let object_color: vec4<f32> = vec4<f32>((uv.x) % 2.0, 0.0, (uv.y) % 2.0, 1.0); 
+    //let object_color: vec4<f32> = vec4<f32>((uv.x) % 2.0, 0.0, (uv.y) % 2.0, 1.0); 
     
     // We don't need (or want) much ambient light, so 0.1 is fine
     var ambient_strength = 0.2;

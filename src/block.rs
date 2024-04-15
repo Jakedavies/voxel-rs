@@ -16,8 +16,8 @@ pub enum BlockType {
     Ore,
 }
 
-impl Into<u16> for BlockType {
-    fn into(self) -> u16 {
+impl Into<u32> for BlockType {
+    fn into(self) -> u32 {
         match self {
             BlockType::Stone => 0,
             BlockType::Dirt => 1 << 8 | 1,
