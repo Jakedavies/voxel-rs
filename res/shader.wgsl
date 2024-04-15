@@ -46,23 +46,10 @@ fn vs_main(
     instance: InstanceInput,
 ) -> VertexOutput {
 
-    let model_matrix = mat4x4<f32>(
-        instance.model_matrix_0,
-        instance.model_matrix_1,
-        instance.model_matrix_2,
-        instance.model_matrix_3,
-    );
-    // NEW!
-    let normal_matrix = mat3x3<f32>(
-        instance.normal_matrix_0,
-        instance.normal_matrix_1,
-        instance.normal_matrix_2,
-    );
-
     var out: VertexOutput;
     out.world_normal = model.normal;
 
-    var world_position: vec4<f32> = model_matrix * vec4<f32>(model.position, 1.0);
+    var world_position: vec4<f32> = vec4<f32>(model.position, 1.0);
     out.world_position = world_position.xyz;
     out.clip_position = camera.view_proj * world_position;
     out.block_data_0 = instance.block_data_0;

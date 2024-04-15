@@ -138,7 +138,7 @@ impl Chunk16 {
             // won't render this block and not add its vertices to the list
             let (x, y, z) = Self::index_to_xyz(index);
             for face in faces.iter() {
-                let (neighbor_x, neighbor_y, neighbhor_z) =
+                let (neighbor_x, neighbor_y, neighbor_z) =
                     (x as i8 + face.x, y as i8 + face.y, z as i8 + face.z);
 
                 // check we are in bounds first 
@@ -146,11 +146,11 @@ impl Chunk16 {
                     && neighbor_x < CHUNK_SIZE as i8
                     && neighbor_y >= 0
                     && neighbor_y < CHUNK_SIZE as i8
-                    && neighbhor_z >= 0
-                    && neighbhor_z < CHUNK_SIZE as i8
+                    && neighbor_z >= 0
+                    && neighbor_z < CHUNK_SIZE as i8
                 {
                     if let Some(neighbor) =
-                        self.get_block(neighbor_x as u8, neighbor_y as u8, neighbhor_z as u8)
+                        self.get_block(neighbor_x as u8, neighbor_y as u8, neighbor_z as u8)
                     {
                         // if there is an active neighbor on this face, skip it
                         if neighbor.is_active {
@@ -159,43 +159,42 @@ impl Chunk16 {
                     }
                 }
                 // else create a quad for this face
-
                 let (x, y, z) = (x as f32, y as f32, z as f32);
-                let offset = Vector3::<f32>::new(x, y, z) * BLOCK_SIZE;
+                let offset = (Vector3::<f32>::new(x, y, z) * BLOCK_SIZE) + (self.origin.cast::<f32>().unwrap() * BLOCK_SIZE * CHUNK_SIZE as f32).to_vec();
 
                 let (x_normal, y_normal, z_normal) = (face.x, face.y, face.z);
                 let face_vertices: Vec<ModelVertex> = match (x_normal, y_normal, z_normal) {
-                    (1, 0, 0) => vec![
+                    (1, 0, 0) => vec![ // RIGHT
                         [1.0, 1.0, -1.0],
                         [1.0, 1.0, 1.0],
-                        [1.0, -1.0, 0.0],
+                        [1.0, -1.0, 1.0],
                         [1.0, -1.0, -1.0],
                     ],
-                    (-1, 0, 0) => vec![
-                        [0.0, 1.0, 1.0],
-                        [0.0, 1.0, -1.0],
-                        [0.0, -1.0, -1.0],
-                        [0.0, -1.0, 1.0],
-                    ],
-                    (0, 1, 0) => vec![
-                        [1.0, 1.0, 1.0],
+                    (-1, 0, 0) => vec![ // LEFT
                         [-1.0, 1.0, 1.0],
                         [-1.0, 1.0, -1.0],
+                        [-1.0, -1.0, -1.0],
+                        [-1.0, -1.0, 1.0],
+                    ],
+                    (0, 1, 0) => vec![ // TOP
+                        [1.0, 1.0, 1.0],
                         [1.0, 1.0, -1.0],
+                        [-1.0, 1.0, -1.0],
+                        [-1.0, 1.0, 1.0],
                     ],
-                    (0, -1, 0) => vec![
-                        [1.0, 0.0, -1.0],
-                        [-1.0, 0.0, -1.0],
-                        [-1.0, 0.0, 1.0],
-                        [1.0, 0.0, 1.0],
+                    (0, -1, 0) => vec![ // BOTTOM
+                        [-1.0, -1.0, 1.0],
+                        [-1.0, -1.0, -1.0],
+                        [1.0, -1.0, -1.0],
+                        [1.0, -1.0, 1.0],
                     ],
-                    (0, 0, 1) => vec![
+                    (0, 0, 1) => vec![ // FRONT
                         [1.0, 1.0, 1.0],
                         [-1.0, 1.0, 1.0],
                         [-1.0, -1.0, 1.0],
                         [1.0, -1.0, 1.0],
                     ],
-                    (0, 0, -1) => vec![
+                    (0, 0, -1) => vec![ // BACK
                         [1.0, -1.0, -1.0],
                         [-1.0, -1.0, -1.0],
                         [-1.0, 1.0, -1.0],
