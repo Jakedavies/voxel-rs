@@ -1,13 +1,11 @@
 use crate::{
-    aabb::{Aabb, AabbBounds},
+    aabb::Aabb,
     block::{Block, BlockType, BLOCK_SIZE},
-    camera::Frustrum,
-    model::{self, Model, ModelVertex},
+    model::{self, Mesh, ModelVertex},
 };
 use cgmath::{prelude::*, Point3, Vector3};
 use log::info;
 use noise::NoiseFn;
-use wgpu::{hal::Device, util::DeviceExt};
 
 pub const CHUNK_SIZE: usize = 16;
 const NOISE_SCALE: f64 = 0.01;
@@ -21,17 +19,30 @@ pub trait Chunk {
 pub struct Chunk16 {
     pub origin: cgmath::Point3<i32>,
     pub blocks: [Block; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE],
+    pub dirty: bool,
 }
 
 pub struct ChunkWithMesh {
     pub chunk: Chunk16,
-    pub mesh: model::Mesh,
+    pub mesh: Mesh,
+    pub mesh_handle: model::MeshHandle,
+}
+
+impl ChunkWithMesh {
+    pub fn new(chunk: Chunk16, mesh: Mesh, mesh_handle: model::MeshHandle) -> Self {
+        Self {
+            chunk,
+            mesh,
+            mesh_handle,
+        }
+    }
 }
 
 impl Chunk16 {
     pub fn new(x: i32, y: i32, z: i32) -> Self {
         Self {
             origin: cgmath::Point3::new(x, y, z),
+            dirty: false,
             blocks: {
                 let mut blocks = Vec::with_capacity(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE);
                 let chunk_origin = cgmath::Point3::new(
@@ -93,34 +104,7 @@ impl Chunk16 {
         self
     }
 
-    // get all blocks that intersect with a ray
-    pub fn collision_check(&mut self, d0: cgmath::Point3<f32>, dir: cgmath::Vector3<f32>) {
-        let mut candidates = Vec::new();
-        let location = self.origin;
-        for block in self.blocks.iter_mut() {
-            if block.is_active {
-                if let Some(hit) = block.intersect_ray(d0, dir) {
-                    let position = d0 + dir * hit[0];
-                    candidates.push((block, hit));
-                } else {
-                    block.is_selected = false;
-                }
-            }
-        }
-        candidates.sort_by(|a, b| a.1[0].partial_cmp(&b.1[0]).unwrap());
-        if let Some(c) = candidates.first_mut() {
-            c.0.is_selected = true;
-        };
-        for c in candidates.iter_mut().skip(1) {
-            c.0.is_selected = false;
-        }
-    }
-
-    pub fn generate_mesh(
-        self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> anyhow::Result<ChunkWithMesh> {
+    pub fn generate_mesh(&self) -> Mesh {
         // we only need faces where there isn't a block butted up against it
         let mut vertices: Vec<ModelVertex> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
@@ -139,12 +123,12 @@ impl Chunk16 {
             // if this block isn't active, don't bother
             // for each block face, test if there is a block next to that face, if there is we
             // won't render this block and not add its vertices to the list
-            let (x, y, z) = Self::index_to_xyz(index);
+            let (x, y, z) = Chunk16::index_to_xyz(index);
             for face in faces.iter() {
                 let (neighbor_x, neighbor_y, neighbor_z) =
                     (x as i8 + face.x, y as i8 + face.y, z as i8 + face.z);
 
-                // check we are in bounds first 
+                // check we are in bounds first
                 if neighbor_x >= 0
                     && neighbor_x < CHUNK_SIZE as i8
                     && neighbor_y >= 0
@@ -163,45 +147,50 @@ impl Chunk16 {
                 }
                 // else create a quad for this face
                 let (x, y, z) = (x as f32, y as f32, z as f32);
-                let offset = (Vector3::<f32>::new(x, y, z) * BLOCK_SIZE) + 
-                    (self.origin.cast::<f32>().unwrap() * BLOCK_SIZE * CHUNK_SIZE as f32).to_vec()
+                let offset = (Vector3::<f32>::new(x, y, z) * BLOCK_SIZE)
+                    + (self.origin.cast::<f32>().unwrap() * BLOCK_SIZE * CHUNK_SIZE as f32)
+                        .to_vec()
                     + Vector3::new(BLOCK_SIZE / 2.0, BLOCK_SIZE / 2.0, BLOCK_SIZE / 2.0);
-
-
 
                 let (x_normal, y_normal, z_normal) = (face.x, face.y, face.z);
                 let face_vertices: Vec<ModelVertex> = match (x_normal, y_normal, z_normal) {
-                    (1, 0, 0) => vec![ // RIGHT
+                    (1, 0, 0) => vec![
+                        // RIGHT
                         [1.0, 1.0, -1.0],
                         [1.0, 1.0, 1.0],
                         [1.0, -1.0, 1.0],
                         [1.0, -1.0, -1.0],
                     ],
-                    (-1, 0, 0) => vec![ // LEFT
+                    (-1, 0, 0) => vec![
+                        // LEFT
                         [-1.0, 1.0, 1.0],
                         [-1.0, 1.0, -1.0],
                         [-1.0, -1.0, -1.0],
                         [-1.0, -1.0, 1.0],
                     ],
-                    (0, 1, 0) => vec![ // TOP
+                    (0, 1, 0) => vec![
+                        // TOP
                         [1.0, 1.0, 1.0],
                         [1.0, 1.0, -1.0],
                         [-1.0, 1.0, -1.0],
                         [-1.0, 1.0, 1.0],
                     ],
-                    (0, -1, 0) => vec![ // BOTTOM
+                    (0, -1, 0) => vec![
+                        // BOTTOM
                         [-1.0, -1.0, 1.0],
                         [-1.0, -1.0, -1.0],
                         [1.0, -1.0, -1.0],
                         [1.0, -1.0, 1.0],
                     ],
-                    (0, 0, 1) => vec![ // FRONT
+                    (0, 0, 1) => vec![
+                        // FRONT
                         [1.0, 1.0, 1.0],
                         [-1.0, 1.0, 1.0],
                         [-1.0, -1.0, 1.0],
                         [1.0, -1.0, 1.0],
                     ],
-                    (0, 0, -1) => vec![ // BACK
+                    (0, 0, -1) => vec![
+                        // BACK
                         [1.0, -1.0, -1.0],
                         [-1.0, -1.0, -1.0],
                         [-1.0, 1.0, -1.0],
@@ -211,10 +200,12 @@ impl Chunk16 {
                 }
                 .iter()
                 .map(|v| {
+                    let mut block_data: u32 = block.t.into();
+                    block_data |= if block.is_selected { 1 << 16 } else { 0 };
                     ModelVertex::new(
                         [v[0] + offset.x, v[1] + offset.y, v[2] + offset.z],
                         [x_normal as f32, y_normal as f32, z_normal as f32],
-                        block.t.into(),
+                        block_data
                     )
                 })
                 .collect();
@@ -231,44 +222,17 @@ impl Chunk16 {
                 ]);
             }
         }
-
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
-        let mesh = model::Mesh {
-            name: format!(
-                "chunk_{}_{}_{}",
-                self.origin.x, self.origin.y, self.origin.z
-            ),
-            vertex_buffer,
-            index_buffer,
-            num_elements: indices.len() as u32,
-        };
-
-        Ok(ChunkWithMesh {
-            chunk: self,
-            mesh,
-        })
+        Mesh { vertices, indices }
     }
 }
 
-
 impl Chunk16 {
-    fn xyz_to_index(x: u8, y: u8, z: u8) -> usize {
+    pub fn xyz_to_index(x: u8, y: u8, z: u8) -> usize {
         let (x, y, z) = (x as usize, y as usize, z as usize);
         x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE
     }
 
-    fn index_to_xyz(index: usize) -> (u8, u8, u8) {
+    pub fn index_to_xyz(index: usize) -> (u8, u8, u8) {
         let x = index % CHUNK_SIZE;
         let y = (index / CHUNK_SIZE) % CHUNK_SIZE;
         let z = index / CHUNK_SIZE / CHUNK_SIZE;

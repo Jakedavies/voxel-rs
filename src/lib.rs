@@ -18,7 +18,7 @@ use egui_wgpu::ScreenDescriptor;
 use fps::Fps;
 use light::LightUniform;
 use log::{debug, info};
-use model::{DrawLight, DrawModel, Mesh, Model, ModelVertex};
+use model::{DrawLight, DrawModel, MeshHandle, Model, ModelVertex};
 use noise::{Fbm, Simplex};
 use notify::{event::ModifyKind, RecommendedWatcher, RecursiveMode, Watcher};
 use wgpu::util::DeviceExt;
@@ -38,6 +38,7 @@ mod aabb;
 mod block;
 mod camera;
 mod chunk;
+mod chunk_manager;
 mod egui_renderer;
 mod fps;
 mod light;
@@ -45,9 +46,8 @@ mod model;
 mod physics;
 mod resources;
 mod texture;
-mod chunk_manager;
 
-const CHUNK_RENDER_DISTANCE: i32 = 12;
+const CHUNK_RENDER_DISTANCE: i32 = 1;
 pub const GRAVITY: f32 = 9.8;
 pub const ROTATE_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0., 0.0, 0.0, 0.0, 0.0, 1.0,
@@ -418,19 +418,9 @@ impl State {
     fn update(&mut self, dt: std::time::Duration) {
         self.camera_controller.update_camera(&mut self.camera, dt);
 
-        /**
-        physics::cast_ray(
-            &self.camera,
-            self.chunk_manager.loaded_chunks.values().map(|chunk| &chunk.chunk),
-        ); */
-
-        physics::update_body(
-            &mut self.camera, 
-            self.chunk_manager.loaded_chunks.values().map(|chunk| &chunk.chunk),
-            dt);
-
         self.camera_uniform
             .update_view_proj(&self.camera, &self.projection);
+
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
@@ -445,7 +435,43 @@ impl State {
             (camera_pos.z / (CHUNK_SIZE as f32 * BLOCK_SIZE)).floor() as i32,
         );
 
-        self.chunk_manager.update_loaded_chunks(&self.noise, &self.device, &self.queue, camera_chunk, CHUNK_RENDER_DISTANCE);
+        self.chunk_manager.update_loaded_chunks(
+            &self.noise,
+            &self.device,
+            &self.queue,
+            camera_chunk,
+            CHUNK_RENDER_DISTANCE,
+        );
+
+        physics::update_body(
+            &mut self.camera,
+            self.chunk_manager
+                .loaded_chunks
+                .values()
+                .map(|chunk| &chunk.chunk),
+            dt,
+        );
+
+        // reset _all_ blocks to inactive (this feels very inefficient...)
+        for chunk in self.chunk_manager.loaded_chunks.values_mut() {
+            for block in chunk.chunk.blocks.iter_mut() {
+                //block.is_selected = false;
+            }
+        }
+
+        // update active block based on camera position
+        if let Some(block) = physics::cast_ray_mut(
+            &self.camera.physics_state.position,
+            &self.camera.look_direction(),
+            self.chunk_manager
+                .loaded_chunks
+                .values_mut()
+                .map(|chunk| &mut chunk.chunk),
+        ) {
+            block.is_selected = true;
+            // Set active state, reset other active states
+            info!("Block selected: {:?}, {:?}", block, self.camera.physics_state.position);
+        }
 
         // Update the light
         let old_position: cgmath::Vector3<_> = self.light_uniform.position.into();
@@ -472,8 +498,15 @@ impl State {
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
-
         let updated = self.file_watcher.clone().next();
+
+        for chunk in self.chunk_manager.loaded_chunks.values_mut() {
+            //let new_mesh = chunk.chunk.generate_mesh();
+            //chunk
+             //   .mesh_handle
+              //  .update_mesh(&new_mesh, &self.device, &self.queue);
+            chunk.chunk.dirty = false;
+        }
 
         // if shader has updated, recreate render Pipeline
         if let Some(path) = updated {
@@ -549,7 +582,7 @@ impl State {
 
             for chunk in self.chunk_manager.loaded_chunks.values() {
                 render_pass.draw_mesh_instanced(
-                    &chunk.mesh,
+                    &chunk.mesh_handle,
                     0..1,
                     &self.camera_bind_group,
                     &self.light_bind_group,
@@ -727,7 +760,7 @@ pub async fn run() {
                         Ok(_) => {}
                         // Reconfigure the surface if lost
                         Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
-                        // The system is out of memory, we should probably quit
+                        // The system is out of memory, we shuld probably quit
                         Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
                         // All other errors (Outdated, Timeout) should be resolved by the next frame
                         Err(e) => eprintln!("{:?}", e),

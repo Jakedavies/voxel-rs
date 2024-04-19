@@ -1,5 +1,8 @@
 use std::ops::Range;
 
+use log::info;
+use wgpu::util::DeviceExt;
+
 use crate::texture::Texture;
 
 // model.rs
@@ -36,7 +39,7 @@ impl Vertex for ModelVertex {
 }
 
 pub struct Model {
-    pub meshes: Vec<Mesh>,
+    pub meshes: Vec<MeshHandle>,
     pub materials: Vec<Material>,
 }
 
@@ -46,23 +49,94 @@ pub struct Material {
     pub bind_group: wgpu::BindGroup,
 }
 
-pub struct Mesh {
+pub struct MeshHandle {
     pub name: String,
     pub vertex_buffer: wgpu::Buffer,
+    pub vertex_buffer_length: u32,
     pub index_buffer: wgpu::Buffer,
+    pub index_buffer_length: u32,
     pub num_elements: u32,
+}
+
+impl MeshHandle {
+    // create a mesh handle from a mesh and device
+    pub fn from_mesh(device: &wgpu::Device, mesh: &Mesh) -> Self {
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::cast_slice(&mesh.vertices),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::cast_slice(&mesh.indices),
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+        });
+
+        Self {
+            name: "Mesh".to_string(),
+            vertex_buffer,
+            vertex_buffer_length: mesh.vertices.len() as u32,
+            index_buffer,
+            index_buffer_length: mesh.indices.len() as u32,
+            num_elements: mesh.indices.len() as u32,
+        }
+    }
+
+    pub fn update_mesh(&mut self, mesh: &Mesh, device: &wgpu::Device, queue: &wgpu::Queue) {
+        // update vertex buffer
+        self.num_elements = mesh.indices.len() as u32;
+        info!("Updating mesh with {} vertices and {} indices", mesh.vertices.len(), mesh.indices.len());
+        if mesh.vertices.len() as u32 > self.vertex_buffer_length {
+            info!("Resizing vertex buffer");
+            self.vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                contents: bytemuck::cast_slice(&mesh.vertices),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            });
+            self.vertex_buffer_length = mesh.vertices.len() as u32;
+        } else {
+            queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&mesh.vertices));
+        }
+
+        if mesh.indices.len() as u32 > self.index_buffer_length {
+            info!("Resizing index buffer");
+            self.index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                contents: bytemuck::cast_slice(&mesh.indices),
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            });
+            self.index_buffer_length = mesh.indices.len() as u32;
+        } else {
+            queue.write_buffer(&self.index_buffer, 0, bytemuck::cast_slice(&mesh.indices));
+        }
+    }
+}
+
+pub struct Mesh {
+    pub vertices: Vec<ModelVertex>,
+    pub indices: Vec<u32>,
+}
+
+impl Mesh {
+    pub fn new() -> Self {
+        Self {
+            vertices: Vec::new(),
+            indices: Vec::new(),
+        }
+    }
 }
 
 pub trait DrawModel<'a> {
     fn draw_mesh(
         &mut self,
-        mesh: &'a Mesh,
+        mesh: &'a MeshHandle,
         camera_bind_group: &'a wgpu::BindGroup,
         light_bind_group: &'a wgpu::BindGroup,
     );
     fn draw_mesh_instanced(
         &mut self,
-        mesh: &'a Mesh,
+        mesh: &'a MeshHandle,
         instances: Range<u32>,
         camera_bind_group: &'a wgpu::BindGroup,
         light_bind_group: &'a wgpu::BindGroup,
@@ -89,7 +163,7 @@ where
 {
     fn draw_mesh(
         &mut self,
-        mesh: &'b Mesh,
+        mesh: &'b MeshHandle,
         camera_bind_group: &'b wgpu::BindGroup,
         light_bind_group: &'b wgpu::BindGroup,
     ) {
@@ -98,7 +172,7 @@ where
 
     fn draw_mesh_instanced(
         &mut self,
-        mesh: &'b Mesh,
+        mesh: &'b MeshHandle,
         instances: Range<u32>,
         camera_bind_group: &'b wgpu::BindGroup,
         light_bind_group: &'b wgpu::BindGroup,
@@ -137,13 +211,13 @@ where
 pub trait DrawLight<'a> {
     fn draw_light_mesh(
         &mut self,
-        mesh: &'a Mesh,
+        mesh: &'a MeshHandle,
         camera_bind_group: &'a wgpu::BindGroup,
         light_bind_group: &'a wgpu::BindGroup,
     );
     fn draw_light_mesh_instanced(
         &mut self,
-        mesh: &'a Mesh,
+        mesh: &'a MeshHandle,
         instances: Range<u32>,
         camera_bind_group: &'a wgpu::BindGroup,
         light_bind_group: &'a wgpu::BindGroup,
@@ -170,7 +244,7 @@ where
 {
     fn draw_light_mesh(
         &mut self,
-        mesh: &'b Mesh,
+        mesh: &'b MeshHandle,
         camera_bind_group: &'b wgpu::BindGroup,
         light_bind_group: &'b wgpu::BindGroup,
     ) {
@@ -179,7 +253,7 @@ where
 
     fn draw_light_mesh_instanced(
         &mut self,
-        mesh: &'b Mesh,
+        mesh: &'b MeshHandle,
         instances: Range<u32>,
         camera_bind_group: &'b wgpu::BindGroup,
         light_bind_group: &'b wgpu::BindGroup,

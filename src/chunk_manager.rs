@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use log::info;
 use noise::NoiseFn;
 
-use crate::chunk::{Chunk16, ChunkWithMesh};
+use crate::{chunk::{Chunk16, ChunkWithMesh}, model::{Mesh, MeshHandle}};
 
 pub struct ChunkManager {
     pub loaded_chunks: HashMap<(i32, i32, i32), ChunkWithMesh>,
@@ -30,13 +30,20 @@ impl ChunkManager {
                     .entry((x, position.1, z))
                     .or_insert_with(|| {
                         info!("Loading chunk at {:?}", (x, position.1, z));
-                        Chunk16::new(x, position.1, z)
-                            .generate(&noise)
-                            .generate_mesh(device, queue)
-                            .expect("Failed to generate chunk mesh")
+                        let chunk = Chunk16::new(x, position.1, z)
+                            .generate(&noise);
+
+                        let mesh = chunk.generate_mesh();
+                        let mesh_handle = MeshHandle::from_mesh(device, &mesh);
+                        ChunkWithMesh {
+                            chunk,
+                            mesh,
+                            mesh_handle,
+                        }
                     });
             }
         }
+
 
         // unload any chunks out of radius
         let to_remove = self

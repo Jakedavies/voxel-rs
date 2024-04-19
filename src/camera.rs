@@ -119,6 +119,17 @@ impl Camera {
         )
     }
 
+    pub fn look_direction(&self) -> Vector3<f32> {
+        let (yaw_sin, yaw_cos) = self.yaw.0.sin_cos();
+        let (pitch_sin, pitch_cos) = self.pitch.0.sin_cos();
+
+        Vector3::new(
+            pitch_cos * yaw_cos,
+            pitch_sin,
+            pitch_cos * yaw_sin,
+        )
+    }
+
     pub fn frustrum(&self, projection: &Projection) -> Frustrum {
         let matrix = projection.calc_matrix_opengl() * self.calc_matrix();
 

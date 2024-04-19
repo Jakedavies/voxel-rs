@@ -111,10 +111,12 @@ pub async fn load_model(
                 usage: wgpu::BufferUsages::INDEX,
             });
 
-            model::Mesh {
+            model::MeshHandle {
                 name: file_name.to_string(),
                 vertex_buffer,
+                vertex_buffer_length: vertices.len() as u32,
                 index_buffer,
+                index_buffer_length: m.mesh.indices.len() as u32,
                 num_elements: m.mesh.indices.len() as u32,
             }
         })

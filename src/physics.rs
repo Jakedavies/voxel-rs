@@ -2,11 +2,9 @@ use std::time::Duration;
 
 use cgmath::num_traits::Float;
 use log::info;
-use wgpu::naga::Block;
 
 use crate::{
-    aabb::{Aabb, AabbBounds},
-    chunk::{Chunk16, ChunkWithMesh},
+    aabb::{Aabb, AabbBounds}, block::Block, chunk::{Chunk16, ChunkWithMesh}
 };
 
 const GRAVITY: f32 = 9.8 * 2.0; // our blocks are 2.0 wide, gravity feels funky unless scaled
@@ -154,6 +152,57 @@ pub fn update_body<'a>(
     }
 }
 
+pub fn cast_ray<'a>(
+    origin: &cgmath::Point3<f32>,
+    direction: &cgmath::Vector3<f32>,
+    chunks: impl Iterator<Item = &'a Chunk16>,
+) -> Option<&'a Block> {
+    // ray intersect chunks, then intersect any hit chunks
+    let valid_chunks = chunks
+        .filter(|chunk| chunk.aabb().intersect_ray(origin, direction).is_some());
+
+    let mut closest_collision: Option<&Block> = None;
+    let mut hit_point: Option<f32> = None;
+
+    for chunk in valid_chunks {
+        for block in chunk.blocks.iter() {
+            if let Some(intersection) = block.aabb().intersect_ray(origin, direction) {
+                if intersection[0] < hit_point.unwrap_or(f32::INFINITY) {
+                    hit_point = Some(intersection[0]);
+                    closest_collision = Some(block);
+                }
+            }
+        }
+    }
+    closest_collision
+}
+
+// TODO: this is duplicate spaghetti of normal raycast
+pub fn cast_ray_mut<'a>(
+    origin: &cgmath::Point3<f32>,
+    direction: &cgmath::Vector3<f32>,
+    chunks: impl Iterator<Item = &'a mut Chunk16>,
+) -> Option<&'a mut Block> {
+    // ray intersect chunks, then intersect any hit chunks
+    let valid_chunks = chunks
+        .filter(|chunk| chunk.aabb().intersect_ray(origin, direction).is_some());
+
+    let mut closest_collision: Option<&mut Block> = None;
+    let mut hit_point: Option<f32> = None;
+
+    for chunk in valid_chunks {
+        for block in chunk.blocks.iter_mut() {
+            if let Some(intersection) = block.aabb().intersect_ray(origin, direction) {
+                if intersection[0] < hit_point.unwrap_or(f32::INFINITY) {
+                    hit_point = Some(intersection[0]);
+                    closest_collision = Some(block);
+                }
+            }
+        }
+    }
+    closest_collision
+}
+
 #[cfg(test)]
 mod tests {
     use cgmath::AbsDiffEq;
@@ -162,14 +211,14 @@ mod tests {
 
     #[test]
     fn test_collide_chunks_no_expected_collision() {
-        let chunk = Chunk16::new(0, 0, 0);
+        let mut chunk = Chunk16::new(0, 0, 0);
         let chunks = vec![chunk];
         let cube_collider = CubeCollider {
             height: 1.0,
             width: 1.0,
             origin: cgmath::Point3::new(-1.0, 0.0, 0.0),
         };
-        let result = collide_chunks(&chunks, &cube_collider);
+        let result = collide_chunks(chunks.iter(), &cube_collider);
         assert_eq!(result, None)
     }
 
@@ -182,7 +231,7 @@ mod tests {
             width: 1.0,
             origin: cgmath::Point3::new(-0.5, 2.0, 2.0),
         };
-        let result = collide_chunks(&chunks, &cube_collider);
+        let result = collide_chunks(chunks.iter(), &cube_collider);
 
         // we expect a collision in the x axis, accounting for floating point error
         assert!(AbsDiffEq::abs_diff_eq(
