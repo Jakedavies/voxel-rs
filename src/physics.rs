@@ -69,7 +69,7 @@ impl Aabb for CubeCollider {
 
 // this function will take a list of chunks and a cube collider and return the reverse direction of the collision
 fn collide_chunks<'a>(
-    chunks: impl Iterator<Item = &'a Chunk16>,
+    chunks: impl Iterator<Item = &'a Chunk16> + Clone,
     collision_body: &impl Aabb,
 ) -> Option<cgmath::Vector3<f32>> {
     // build an aabb from the current position and future position to prune chunks
@@ -81,6 +81,9 @@ fn collide_chunks<'a>(
         .filter(|block| block.is_active);
 
     let mut collision_reverse = cgmath::Vector3::new(0.0, 0.0, 0.0);
+    if blocks.clone().count() == 0 {
+        return None;
+    }
     // for each intersection axis, take the max reverse direction
     for block in blocks {
         if let Some(collision_info) = collision_body.aabb().intersection(&block.aabb()) {
@@ -211,7 +214,7 @@ mod tests {
 
     #[test]
     fn test_collide_chunks_no_expected_collision() {
-        let mut chunk = Chunk16::new(0, 0, 0);
+        let chunk = Chunk16::new(0, 0, 0);
         let chunks = vec![chunk];
         let cube_collider = CubeCollider {
             height: 1.0,
@@ -224,14 +227,16 @@ mod tests {
 
     #[test]
     fn test_collide_chunks() {
-        let chunk = Chunk16::new(0, 0, 0);
+        let mut chunk = Chunk16::new(0, 0, 0);
+        chunk.blocks[0].is_active = true;
         let chunks = vec![chunk];
         let cube_collider = CubeCollider {
             height: 1.0,
             width: 1.0,
-            origin: cgmath::Point3::new(-0.5, 2.0, 2.0),
+            origin: cgmath::Point3::new(-0.4, 0.0, 0.0),
         };
         let result = collide_chunks(chunks.iter(), &cube_collider);
+        println!("{:?}", result);
 
         // we expect a collision in the x axis, accounting for floating point error
         assert!(AbsDiffEq::abs_diff_eq(
