@@ -47,7 +47,7 @@ mod physics;
 mod resources;
 mod texture;
 
-const CHUNK_RENDER_DISTANCE: i32 = 1;
+const CHUNK_RENDER_DISTANCE: i32 = 5;
 pub const GRAVITY: f32 = 9.8;
 pub const ROTATE_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0., 0.0, 0.0, 0.0, 0.0, 1.0,
@@ -455,22 +455,21 @@ impl State {
         // reset _all_ blocks to inactive (this feels very inefficient...)
         for chunk in self.chunk_manager.loaded_chunks.values_mut() {
             for block in chunk.chunk.blocks.iter_mut() {
-                //block.is_selected = false;
+                block.is_selected = false;
             }
         }
 
         // update active block based on camera position
-        if let Some(block) = physics::cast_ray_mut(
+        if let Some(block) = physics::cast_ray_chunks_mut(
             &self.camera.physics_state.position,
             &self.camera.look_direction(),
             self.chunk_manager
                 .loaded_chunks
                 .values_mut()
                 .map(|chunk| &mut chunk.chunk),
+            15.0
         ) {
             block.is_selected = true;
-            // Set active state, reset other active states
-            info!("Block selected: {:?}, {:?}", block, self.camera.physics_state.position);
         }
 
         // Update the light
@@ -501,11 +500,11 @@ impl State {
         let updated = self.file_watcher.clone().next();
 
         for chunk in self.chunk_manager.loaded_chunks.values_mut() {
-            //let new_mesh = chunk.chunk.generate_mesh();
-            //chunk
-             //   .mesh_handle
-              //  .update_mesh(&new_mesh, &self.device, &self.queue);
-            chunk.chunk.dirty = false;
+            let new_mesh = chunk.chunk.generate_mesh();
+            chunk
+                .mesh_handle
+                .update_mesh(&new_mesh, &self.device, &self.queue);
+            //chunk.chunk.dirty = false;
         }
 
         // if shader has updated, recreate render Pipeline
@@ -605,13 +604,23 @@ impl State {
             |ui| {
                 egui::Window::new("Debug").show(ui, |ui| {
                     ui.label(format!(
-                        "Camera Position: {:?}",
-                        self.camera.physics_state.position
+                        "Camera Position: {:.2}, {:.2}, {:.2}",
+                        self.camera.physics_state.position.x,
+                        self.camera.physics_state.position.y,
+                        self.camera.physics_state.position.z
                     ));
                     ui.label(format!("FPS: {:.2}", self.fps_tracker.get_fps()));
                     ui.label(format!(
-                        "Velocity: {:?}",
-                        self.camera.physics_state.velocity
+                        "Velocity: {:.2}, {:.2}, {:.2}",
+                        self.camera.physics_state.velocity.x,
+                        self.camera.physics_state.velocity.y,
+                        self.camera.physics_state.velocity.z
+                    ));
+                    ui.label(format!(
+                        "Look Direction: {:.2}, {:.2}, {:.2}",
+                        self.camera.look_direction().x,
+                        self.camera.look_direction().y,
+                        self.camera.look_direction().z
                     ));
                     ui.label(format!(
                         "Grounded: {:?}",

@@ -155,10 +155,11 @@ pub fn update_body<'a>(
     }
 }
 
-pub fn cast_ray<'a>(
+pub fn cast_ray_chunks<'a>(
     origin: &cgmath::Point3<f32>,
     direction: &cgmath::Vector3<f32>,
     chunks: impl Iterator<Item = &'a Chunk16>,
+    max_distance: f32,
 ) -> Option<&'a Block> {
     // ray intersect chunks, then intersect any hit chunks
     let valid_chunks = chunks
@@ -181,12 +182,12 @@ pub fn cast_ray<'a>(
 }
 
 // TODO: this is duplicate spaghetti of normal raycast
-pub fn cast_ray_mut<'a>(
+pub fn cast_ray_chunks_mut<'a>(
     origin: &cgmath::Point3<f32>,
     direction: &cgmath::Vector3<f32>,
     chunks: impl Iterator<Item = &'a mut Chunk16>,
+    max_distance: f32,
 ) -> Option<&'a mut Block> {
-    // ray intersect chunks, then intersect any hit chunks
     let valid_chunks = chunks
         .filter(|chunk| chunk.aabb().intersect_ray(origin, direction).is_some());
 
@@ -194,9 +195,9 @@ pub fn cast_ray_mut<'a>(
     let mut hit_point: Option<f32> = None;
 
     for chunk in valid_chunks {
-        for block in chunk.blocks.iter_mut() {
+        for block in chunk.blocks.iter_mut().filter(|block| block.is_active) {
             if let Some(intersection) = block.aabb().intersect_ray(origin, direction) {
-                if intersection[0] < hit_point.unwrap_or(f32::INFINITY) {
+                if intersection[0] < hit_point.unwrap_or(f32::INFINITY) && intersection[0] < max_distance {
                     hit_point = Some(intersection[0]);
                     closest_collision = Some(block);
                 }
@@ -244,5 +245,48 @@ mod tests {
             &cgmath::Vector3::new(0.1, 0.0, 0.0),
             1e-6
         ));
+    }
+
+    #[test]
+    fn test_raycasting() {
+        let mut chunk = Chunk16::new(0, 0, 0);
+        chunk.blocks[0].is_active = true;
+        let chunks = vec![chunk];
+        let origin = cgmath::Point3::new(-0.1, 0.5, 0.5);
+        let direction = cgmath::Vector3::new(1.0, 0.0, 0.0);
+        let result = cast_ray_chunks(&origin, &direction, chunks.iter());
+        assert_eq!(result.unwrap().origin, cgmath::Point3::new(1.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn test_chunk_collision_looking_up() {
+        let mut chunk = Chunk16::new(0, -1, -1);
+        for block in chunk.blocks.iter_mut() {
+            block.is_active = true;
+        }
+
+        let look_direction = cgmath::Vector3::new(0.0, 1.0, 0.0);
+        let origin = cgmath::Point3::new(9.0, 3.0, -16.0);
+        let mut chunks = vec![chunk];
+        let result = cast_ray_chunks_mut(&origin, &look_direction, chunks.iter_mut());
+        // looking straight up, no expected collision
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_chunk_collision_looking_down() {
+        let mut chunk = Chunk16::new(0, -1, -1);
+        for block in chunk.blocks.iter_mut() {
+            block.is_active = true;
+        }
+
+        println!("{:?}", chunk.aabb());
+
+        let look_direction = cgmath::Vector3::new(0.0, -1.0, 0.0);
+        let origin = cgmath::Point3::new(9.0, 2.0, -17.0);
+        let mut chunks = vec![chunk];
+        let result = cast_ray_chunks_mut(&origin, &look_direction, chunks.iter_mut());
+        // looking straight up, no expected collision
+        assert_eq!(result.unwrap().origin, cgmath::Point3::new(9.0, -1.0, -17.0));
     }
 }
