@@ -47,7 +47,7 @@ mod physics;
 mod resources;
 mod texture;
 
-const CHUNK_RENDER_DISTANCE: i32 = 5;
+const CHUNK_RENDER_DISTANCE: i32 = 0;
 pub const GRAVITY: f32 = 9.8;
 pub const ROTATE_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0., 0.0, 0.0, 0.0, 0.0, 1.0,
@@ -106,6 +106,7 @@ struct State {
     chunk_manager: ChunkManager,
     file_watcher: FileWatcher,
     mouse_pressed: bool,
+    mouse_press_latched: bool,
     noise: Fbm<Simplex>,
     wireframe: Wireframe,
     render_pipeline_dirty: bool,
@@ -349,6 +350,7 @@ impl State {
             diffuse_bind_group,
             file_watcher,
             mouse_pressed: false,
+            mouse_press_latched: false,
             noise,
             wireframe,
             render_pipeline_dirty: false,
@@ -409,6 +411,9 @@ impl State {
                 ..
             } => {
                 self.mouse_pressed = *state == ElementState::Pressed;
+                if *state == ElementState::Released {
+                    self.mouse_press_latched = false;
+                }
                 true
             }
             _ => false,
@@ -456,6 +461,7 @@ impl State {
         for chunk in self.chunk_manager.loaded_chunks.values_mut() {
             for block in chunk.chunk.blocks.iter_mut() {
                 block.is_selected = false;
+            
             }
         }
 
@@ -470,6 +476,10 @@ impl State {
             15.0
         ) {
             block.is_selected = true;
+            if self.mouse_pressed && !self.mouse_press_latched {
+                block.is_active = false;
+                self.mouse_press_latched = true;
+            }
         }
 
         // Update the light
