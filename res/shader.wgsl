@@ -52,28 +52,19 @@ var s_diffuse: sampler;
  
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    var uv: vec2<f32>;
     let faceNormal: vec3<f32> = abs(in.normal);
 
-    if faceNormal.x > faceNormal.y && faceNormal.x > faceNormal.z {
-        // (1, 0, 0) is the abs normal of the face
-        uv = in.position.zy % 2.0;
-    } else if faceNormal.y > faceNormal.x && faceNormal.y > faceNormal.z {
-        // (0, 1, 0) is the abs normal of the face
-        uv = in.position.xz % 2.0;
+    let normalized = fract(abs(in.world_position / 2.0));
+    var uv: vec2<f32>;
+    if (faceNormal.x > 0.9) {
+        uv = vec2<f32>(normalized.z, normalized.y);
+    } else if (faceNormal.y > 0.9) {
+        uv = vec2<f32>(normalized.x, normalized.z);
     } else {
-        // (0, 0, 1) is the abs normal of the face
-        uv = in.position.xy % 2.0;
+        uv = vec2<f32>(normalized.x, normalized.y); 
     }
-    uv = uv / 2.0;
 
-    let selected = in.block_data_0 & 0x00FF0000u;
 
-    // dot normal and position to get a uv coordinate
-    //let uv = vec2<f32>(dot(in.normal.zxy, in.position), dot(in.normal.yzx, in.position));
-    // convert position to a color for debugging
-    let corrected_position = 1.0 - (uv + vec2<f32>(1.0, 1.0)) / 2.0;
-    //let object_color: vec4<f32> = vec4<f32>(corrected_position.x, corrected_position.y,  0.0, 1.0);
 
     // bitshift sides 
     let texture_index_top = in.block_data_0 & 0x000000FFu;
@@ -89,16 +80,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let texture_offset = 1.0 / 16.0;
     let total_offset = texture_position * texture_offset;
-    let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, vec2<f32>(corrected_position.x / 16.0 + total_offset.x, corrected_position.y / 16.0 + total_offset.y));
+    let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, vec2<f32>(uv.x / 16.0 + total_offset.x, uv.y / 16.0 + total_offset.y));
     
     // color from uv only 
     //let object_color: vec4<f32> = vec4<f32>((uv.x) % 2.0, 0.0, (uv.y) % 2.0, 1.0); 
+    let selected = in.block_data_0 & 0x00FF0000u;
     
     // We don't need (or want) much ambient light, so 0.1 is fine
     var ambient_strength = 0.2;
     if selected != 0u {
-        ambient_strength = 0.5;
+        ambient_strength = 0.4;
     }
+
+    // make borders of selected block grey
+
     let ambient_color = light.color * ambient_strength;
 
     let light_dir = normalize(light.position - in.world_position);
@@ -106,7 +101,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let diffuse_strength = max(dot(in.world_normal, light_dir), 0.0);
     let diffuse_color = light.color * diffuse_strength;
 
-    let result = (ambient_color + diffuse_color) * object_color.xyz;
+    var result = (ambient_color + diffuse_color) * object_color.xyz;
+    if selected != 0u {
+        if uv.x > 0.995 || uv.y > 0.995 || uv.x < 0.005 || uv.y < 0.005 {
+            result = vec3<f32>(0.0, 0.0, 0.0);
+        }
+    }
 
     return vec4<f32>(result, object_color.a);
 }
