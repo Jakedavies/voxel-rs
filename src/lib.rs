@@ -47,7 +47,7 @@ mod physics;
 mod resources;
 mod texture;
 
-const CHUNK_RENDER_DISTANCE: i32 = 0;
+const CHUNK_RENDER_DISTANCE: i32 = 12;
 pub const GRAVITY: f32 = 9.8;
 pub const ROTATE_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0., 0.0, 0.0, 0.0, 0.0, 1.0,
@@ -461,23 +461,23 @@ impl State {
         for chunk in self.chunk_manager.loaded_chunks.values_mut() {
             for block in chunk.chunk.blocks.iter_mut() {
                 block.is_selected = false;
-            
             }
         }
 
         // update active block based on camera position
-        if let Some(block) = physics::cast_ray_chunks_mut(
+        if let Some(mut raycast_result) = physics::cast_ray_chunks_mut(
             &self.camera.physics_state.position,
             &self.camera.look_direction(),
             self.chunk_manager
                 .loaded_chunks
                 .values_mut()
                 .map(|chunk| &mut chunk.chunk),
-            15.0
         ) {
-            block.is_selected = true;
+            if !raycast_result.block().is_selected {
+                raycast_result.block_mut().is_selected = true;
+            }
             if self.mouse_pressed && !self.mouse_press_latched {
-                block.is_active = false;
+                raycast_result.block_mut().is_active = false;
                 self.mouse_press_latched = true;
             }
         }
@@ -509,12 +509,18 @@ impl State {
         let output = self.surface.get_current_texture()?;
         let updated = self.file_watcher.clone().next();
 
-        for chunk in self.chunk_manager.loaded_chunks.values_mut() {
+        for chunk in self
+            .chunk_manager
+            .loaded_chunks
+            .values_mut()
+            .filter(|chunk| chunk.chunk.dirty)
+        {
+            info!("Updating chunk at {:?}", chunk.chunk.origin);
             let new_mesh = chunk.chunk.generate_mesh();
             chunk
                 .mesh_handle
                 .update_mesh(&new_mesh, &self.device, &self.queue);
-            //chunk.chunk.dirty = false;
+            chunk.chunk.dirty = false;
         }
 
         // if shader has updated, recreate render Pipeline

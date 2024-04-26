@@ -4,7 +4,9 @@ use cgmath::num_traits::Float;
 use log::info;
 
 use crate::{
-    aabb::{Aabb, AabbBounds}, block::Block, chunk::{Chunk16, ChunkWithMesh}
+    aabb::{Aabb, AabbBounds},
+    block::Block,
+    chunk::{Chunk16, ChunkWithMesh},
 };
 
 const GRAVITY: f32 = 9.8 * 2.0; // our blocks are 2.0 wide, gravity feels funky unless scaled
@@ -162,8 +164,8 @@ pub fn cast_ray_chunks<'a>(
     max_distance: f32,
 ) -> Option<&'a Block> {
     // ray intersect chunks, then intersect any hit chunks
-    let valid_chunks = chunks
-        .filter(|chunk| chunk.aabb().intersect_ray(origin, direction).is_some());
+    let valid_chunks =
+        chunks.filter(|chunk| chunk.aabb().intersect_ray(origin, direction).is_some());
 
     let mut closest_collision: Option<&Block> = None;
     let mut hit_point: Option<f32> = None;
@@ -181,30 +183,58 @@ pub fn cast_ray_chunks<'a>(
     closest_collision
 }
 
-// TODO: this is duplicate spaghetti of normal raycast
+pub struct ChunkRaycastResult<'a> {
+    pub chunk: &'a mut Chunk16,
+    pub intersection: [f32; 2],
+    block_index: usize,
+}
+
+impl ChunkRaycastResult<'_> {
+    pub fn block(&self) -> &Block {
+        &self.chunk.blocks[self.block_index]
+    }
+    pub fn block_mut(&mut self) -> &mut Block {
+        self.chunk.dirty = true;
+        &mut self.chunk.blocks[self.block_index]
+    }
+}
+
+// TODO: _mega_spaghetti
 pub fn cast_ray_chunks_mut<'a>(
     origin: &cgmath::Point3<f32>,
     direction: &cgmath::Vector3<f32>,
     chunks: impl Iterator<Item = &'a mut Chunk16>,
-    max_distance: f32,
-) -> Option<&'a mut Block> {
-    let valid_chunks = chunks
-        .filter(|chunk| chunk.aabb().intersect_ray(origin, direction).is_some());
+) -> Option<ChunkRaycastResult<'a>> {
+    let valid_chunks =
+        chunks.filter(|chunk| chunk.aabb().intersect_ray(origin, direction).is_some());
 
-    let mut closest_collision: Option<&mut Block> = None;
-    let mut hit_point: Option<f32> = None;
+    valid_chunks.filter_map(|chunk| {
+        let block_intersections = chunk
+            .blocks
+            .iter_mut()
+            .enumerate()
+            .filter(|(_index, block)| block.is_active)
+            .filter_map(|(index, block)| {
+                block.aabb()
+                    .intersect_ray(origin, direction)
+                    .map(|intersection| (index, intersection))
+            })
+            .min_by(|a, b| {
+                a.1[0]
+                    .partial_cmp(&b.1[0])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
 
-    for chunk in valid_chunks {
-        for block in chunk.blocks.iter_mut().filter(|block| block.is_active) {
-            if let Some(intersection) = block.aabb().intersect_ray(origin, direction) {
-                if intersection[0] < hit_point.unwrap_or(f32::INFINITY) && intersection[0] < max_distance {
-                    hit_point = Some(intersection[0]);
-                    closest_collision = Some(block);
-                }
-            }
-        }
-    }
-    closest_collision
+        block_intersections.map(|(block_index, intersection)| ChunkRaycastResult {
+            chunk,
+            block_index,
+            intersection,
+        })
+    }).min_by(|a, b| {
+        a.intersection[0]
+            .partial_cmp(&b.intersection[0])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })
 }
 
 #[cfg(test)]
@@ -251,11 +281,11 @@ mod tests {
     fn test_raycasting() {
         let mut chunk = Chunk16::new(0, 0, 0);
         chunk.blocks[0].is_active = true;
-        let chunks = vec![chunk];
+        let mut chunks = vec![chunk];
         let origin = cgmath::Point3::new(-0.1, 0.5, 0.5);
         let direction = cgmath::Vector3::new(1.0, 0.0, 0.0);
-        let result = cast_ray_chunks(&origin, &direction, chunks.iter());
-        assert_eq!(result.unwrap().origin, cgmath::Point3::new(1.0, 1.0, 1.0));
+        let result = cast_ray_chunks_mut(&origin, &direction, chunks.iter_mut());
+        assert_eq!(result.unwrap().block().origin, cgmath::Point3::new(1.0, 1.0, 1.0));
     }
 
     #[test]
@@ -287,6 +317,9 @@ mod tests {
         let mut chunks = vec![chunk];
         let result = cast_ray_chunks_mut(&origin, &look_direction, chunks.iter_mut());
         // looking straight up, no expected collision
-        assert_eq!(result.unwrap().origin, cgmath::Point3::new(9.0, -1.0, -17.0));
+        assert_eq!(
+            result.unwrap().block().origin,
+            cgmath::Point3::new(9.0, -1.0, -17.0)
+        );
     }
 }
