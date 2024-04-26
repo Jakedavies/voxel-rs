@@ -157,32 +157,6 @@ pub fn update_body<'a>(
     }
 }
 
-pub fn cast_ray_chunks<'a>(
-    origin: &cgmath::Point3<f32>,
-    direction: &cgmath::Vector3<f32>,
-    chunks: impl Iterator<Item = &'a Chunk16>,
-    max_distance: f32,
-) -> Option<&'a Block> {
-    // ray intersect chunks, then intersect any hit chunks
-    let valid_chunks =
-        chunks.filter(|chunk| chunk.aabb().intersect_ray(origin, direction).is_some());
-
-    let mut closest_collision: Option<&Block> = None;
-    let mut hit_point: Option<f32> = None;
-
-    for chunk in valid_chunks {
-        for block in chunk.blocks.iter() {
-            if let Some(intersection) = block.aabb().intersect_ray(origin, direction) {
-                if intersection[0] < hit_point.unwrap_or(f32::INFINITY) {
-                    hit_point = Some(intersection[0]);
-                    closest_collision = Some(block);
-                }
-            }
-        }
-    }
-    closest_collision
-}
-
 pub struct ChunkRaycastResult<'a> {
     pub chunk: &'a mut Chunk16,
     pub intersection: [f32; 2],
