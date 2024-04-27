@@ -16,13 +16,14 @@ Initial rendering code based on the fantastic [Learn WGPU tutorial series](https
 - Block type to texture atlas mapping with shader
 - Chunk based meshing
 - Something resembling a physics engine
+- Block destruction
 
 ### TODO
 In no particular order, here are some future items to look into.
-- Block destruction, placement
+- Block placement
 - Block drops
 - Seeded RNG
 - Fractional voxel support? < a full block
-- "Modding API" for pluggable block generation + adding new block types, drops etc.
+- Modding API for pluggable block generation + adding new block types, drops etc.
 
 
