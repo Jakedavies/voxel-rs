@@ -123,11 +123,7 @@ impl Camera {
         let (yaw_sin, yaw_cos) = self.yaw.0.sin_cos();
         let (pitch_sin, pitch_cos) = self.pitch.0.sin_cos();
 
-        Vector3::new(
-            pitch_cos * yaw_cos,
-            pitch_sin,
-            pitch_cos * yaw_sin,
-        )
+        Vector3::new(pitch_cos * yaw_cos, pitch_sin, pitch_cos * yaw_sin)
     }
 
     pub fn frustrum(&self, projection: &Projection) -> Frustrum {
@@ -322,9 +318,10 @@ impl CameraController {
         let forward = Vector3::new(yaw_cos, 0.0, yaw_sin).normalize();
         let right = Vector3::new(-yaw_sin, 0.0, yaw_cos).normalize();
 
+        // this is a bit wonky because we reach into velocity directly, ideally we would apply
+        // forces
         let velocity = &mut camera.physics_state.velocity;
 
-        // this is a bad stand in for friction but feels vageuly correct
         let jump_scaling = if !camera.physics_state.grounded {
             0.2
         } else {
@@ -345,15 +342,6 @@ impl CameraController {
         // Jumping
         if self.amount_up > 0.0 && camera.physics_state.grounded && velocity.y < 0.1 {
             velocity.y += self.amount_up * self.jump_velocity;
-        }
-
-        // If we are not getting any input, quickly slow down the camera
-        if self.amount_forward == 0.0
-            && self.amount_backward == 0.0
-            && camera.physics_state.grounded
-        {
-            velocity.x *= 0.8;
-            velocity.z *= 0.8;
         }
 
         // Rotate

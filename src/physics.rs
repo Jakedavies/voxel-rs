@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use cgmath::num_traits::Float;
+use cgmath::num_traits::{Float, Signed};
 use log::info;
 
 use crate::{
@@ -105,6 +105,8 @@ fn collide_chunks<'a>(
     Some(collision_reverse)
 }
 
+const FRICTION_ACCEL: f32 = 30.;
+
 pub fn update_body<'a>(
     body: &mut impl KinematicBody,
     chunks: impl Iterator<Item = &'a Chunk16> + Clone,
@@ -119,6 +121,28 @@ pub fn update_body<'a>(
         physics_state.position.x += physics_state.velocity.x * dt.as_secs_f32();
         physics_state.position.y += physics_state.velocity.y * dt.as_secs_f32();
         physics_state.position.z += physics_state.velocity.z * dt.as_secs_f32();
+        // f = ma
+        // a = f / m
+        // apply a friction force in the opposite directiuon of the current velocity
+        // to slow down the object
+        if physics_state.grounded {
+            if (physics_state.velocity.x).abs() > 0.1 {
+                physics_state.velocity.x -= (physics_state.velocity.x
+                    / physics_state.velocity.x.abs())
+                    * FRICTION_ACCEL
+                    * dt.as_secs_f32();
+            } else {
+                physics_state.velocity.x = 0.0;
+            }
+            if (physics_state.velocity.z).abs() > 0.1 {
+                physics_state.velocity.z -= (physics_state.velocity.z
+                    / physics_state.velocity.z.abs())
+                    * FRICTION_ACCEL
+                    * dt.as_secs_f32();
+            } else {
+                physics_state.velocity.z = 0.0;
+            }
+        }
     }
 
     let collider = body.collider();
@@ -182,33 +206,36 @@ pub fn cast_ray_chunks_mut<'a>(
     let valid_chunks =
         chunks.filter(|chunk| chunk.aabb().intersect_ray(origin, direction).is_some());
 
-    valid_chunks.filter_map(|chunk| {
-        let block_intersections = chunk
-            .blocks
-            .iter_mut()
-            .enumerate()
-            .filter(|(_index, block)| block.is_active)
-            .filter_map(|(index, block)| {
-                block.aabb()
-                    .intersect_ray(origin, direction)
-                    .map(|intersection| (index, intersection))
-            })
-            .min_by(|a, b| {
-                a.1[0]
-                    .partial_cmp(&b.1[0])
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+    valid_chunks
+        .filter_map(|chunk| {
+            let block_intersections = chunk
+                .blocks
+                .iter_mut()
+                .enumerate()
+                .filter(|(_index, block)| block.is_active)
+                .filter_map(|(index, block)| {
+                    block
+                        .aabb()
+                        .intersect_ray(origin, direction)
+                        .map(|intersection| (index, intersection))
+                })
+                .min_by(|a, b| {
+                    a.1[0]
+                        .partial_cmp(&b.1[0])
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
 
-        block_intersections.map(|(block_index, intersection)| ChunkRaycastResult {
-            chunk,
-            block_index,
-            intersection,
+            block_intersections.map(|(block_index, intersection)| ChunkRaycastResult {
+                chunk,
+                block_index,
+                intersection,
+            })
         })
-    }).min_by(|a, b| {
-        a.intersection[0]
-            .partial_cmp(&b.intersection[0])
-            .unwrap_or(std::cmp::Ordering::Equal)
-    })
+        .min_by(|a, b| {
+            a.intersection[0]
+                .partial_cmp(&b.intersection[0])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
 }
 
 #[cfg(test)]
@@ -259,7 +286,10 @@ mod tests {
         let origin = cgmath::Point3::new(-0.1, 0.5, 0.5);
         let direction = cgmath::Vector3::new(1.0, 0.0, 0.0);
         let result = cast_ray_chunks_mut(&origin, &direction, chunks.iter_mut());
-        assert_eq!(result.unwrap().block().origin, cgmath::Point3::new(1.0, 1.0, 1.0));
+        assert_eq!(
+            result.unwrap().block().origin,
+            cgmath::Point3::new(1.0, 1.0, 1.0)
+        );
     }
 
     #[test]

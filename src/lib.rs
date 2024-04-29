@@ -615,9 +615,9 @@ impl State {
                 let mut drop = block.drop();
                 // randomize initial velocity a bit
                 drop.physics_state.velocity = cgmath::Vector3::new(
-                    rand::thread_rng().gen_range(-1.0..1.0),
-                    rand::thread_rng().gen_range(1.0..2.0),
-                    rand::thread_rng().gen_range(-1.0..1.0),
+                    rand::thread_rng().gen_range(-2.0..2.0),
+                    rand::thread_rng().gen_range(1.0..3.0),
+                    rand::thread_rng().gen_range(-2.0..2.0),
                 );
 
                 self.drops.push(drop);
