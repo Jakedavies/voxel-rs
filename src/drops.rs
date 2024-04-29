@@ -2,7 +2,7 @@ use cgmath::{EuclideanSpace, Matrix4, Point3, Rotation3, Vector3, Zero};
 use rand::Rng;
 
 use crate::{
-    aabb::AabbBounds, block::BlockType, physics::{KinematicBody, KinematicBodyState}
+    aabb::{Aabb, AabbBounds}, block::BlockType, physics::{KinematicBody, KinematicBodyState}
 };
 
 pub struct Drop {
@@ -20,9 +20,19 @@ impl KinematicBody for Drop {
 
     fn collider(&self) -> AabbBounds {
         AabbBounds::new(
-            self.physics_state.position - Vector3::new(COLLIDER_SIZE, COLLIDER_SIZE, COLLIDER_SIZE),
-            self.physics_state.position + Vector3::new(COLLIDER_SIZE, COLLIDER_SIZE, COLLIDER_SIZE),
+            self.min(),
+            self.max()
         )
+    }
+}
+
+impl Aabb for Drop {
+    fn min(&self) -> Point3<f32> {
+        self.physics_state.position - Vector3::new(COLLIDER_SIZE, COLLIDER_SIZE, COLLIDER_SIZE)
+    }
+
+    fn max(&self) -> Point3<f32> {
+        self.physics_state.position + Vector3::new(COLLIDER_SIZE, COLLIDER_SIZE, COLLIDER_SIZE)
     }
 }
 

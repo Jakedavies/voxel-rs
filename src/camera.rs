@@ -194,17 +194,6 @@ impl Camera {
     }
 }
 
-// check frustrum intersection for culling
-impl Aabb for Camera {
-    fn min(&self) -> Point3<f32> {
-        self.physics_state.position - (self.collider / 2.0)
-    }
-
-    fn max(&self) -> Point3<f32> {
-        self.physics_state.position + (self.collider / 2.0)
-    }
-}
-
 pub struct Projection {
     aspect: f32,
     fovy: Rad<f32>,

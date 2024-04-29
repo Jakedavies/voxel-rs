@@ -5,7 +5,7 @@ use crate::{aabb::Aabb, drops::Drop, physics::KinematicBodyState};
 
 pub const BLOCK_SIZE: f32 = 2.0;
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub enum BlockType {
     #[default]
     Dirt,

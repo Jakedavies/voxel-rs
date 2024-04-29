@@ -8,6 +8,7 @@ use std::{
     time::Instant,
 };
 
+use aabb::Aabb;
 use block::{BlockType, BLOCK_SIZE};
 use camera::{Camera, CameraController, Projection};
 use cgmath::prelude::*;
@@ -17,12 +18,13 @@ use drops::Drop;
 use egui_renderer::EguiRenderer;
 use egui_wgpu::ScreenDescriptor;
 use fps::Fps;
+use inventory::Inventory;
 use light::LightUniform;
 use log::{debug, info};
 use model::{DrawLight, DrawModel, MeshHandle, Model, ModelVertex};
 use noise::{Fbm, Simplex};
 use notify::{event::ModifyKind, RecommendedWatcher, RecursiveMode, Watcher};
-use physics::KinematicBodyState;
+use physics::{KinematicBody, KinematicBodyState};
 use rand::Rng;
 use voxel::load_block;
 use wgpu::util::DeviceExt;
@@ -52,6 +54,7 @@ mod physics;
 mod resources;
 mod texture;
 mod voxel;
+mod inventory;
 
 const CHUNK_RENDER_DISTANCE: i32 = 12;
 pub const GRAVITY: f32 = 9.8;
@@ -189,6 +192,7 @@ struct State {
     egui_renderer: EguiRenderer,
     fps_tracker: Fps,
     drops: Vec<Drop>,
+    inventory: Inventory,
     ready: bool,
 }
 
@@ -471,6 +475,7 @@ impl State {
             fps_tracker: Fps::new(120),
             ready: false,
             instance_buffer,
+            inventory: Inventory::new(),
         }
     }
 
@@ -587,7 +592,16 @@ impl State {
                     .map(|chunk| &chunk.chunk),
                 dt,
             );
+
         }
+
+        self.drops.retain(|drop| {
+            if drop.aabb().intersects(&self.camera.collider()) {
+                self.inventory.add(drop.block_type);
+                return false
+            }
+            true
+        });
 
         // reset _all_ blocks to inactive (this feels very inefficient...)
         for chunk in self.chunk_manager.loaded_chunks.values_mut() {
@@ -595,6 +609,8 @@ impl State {
                 block.is_selected = false;
             }
         }
+        
+        // check if player collides with any of the drops
 
         // update active block based on camera position
         if let Some(mut raycast_result) = physics::cast_ray_chunks_mut(
@@ -810,6 +826,12 @@ impl State {
                         "Grounded: {:?}",
                         self.camera.physics_state.grounded
                     ));
+                    // Subsection for inventory
+                    ui.separator();
+                    ui.label("Inventory");
+                    for (block_type, count) in self.inventory.items.iter() {
+                        ui.label(format!("{:?}: {}", block_type, count));
+                    }
                 });
             },
         );
