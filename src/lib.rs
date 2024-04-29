@@ -13,6 +13,7 @@ use camera::{Camera, CameraController, Projection};
 use cgmath::prelude::*;
 use chunk::{Chunk, ChunkWithMesh, CHUNK_SIZE};
 use chunk_manager::ChunkManager;
+use drops::Drop;
 use egui_renderer::EguiRenderer;
 use egui_wgpu::ScreenDescriptor;
 use fps::Fps;
@@ -21,6 +22,9 @@ use log::{debug, info};
 use model::{DrawLight, DrawModel, MeshHandle, Model, ModelVertex};
 use noise::{Fbm, Simplex};
 use notify::{event::ModifyKind, RecommendedWatcher, RecursiveMode, Watcher};
+use physics::KinematicBodyState;
+use rand::Rng;
+use voxel::load_block;
 use wgpu::util::DeviceExt;
 
 use winit::{
@@ -39,6 +43,7 @@ mod block;
 mod camera;
 mod chunk;
 mod chunk_manager;
+mod drops;
 mod egui_renderer;
 mod fps;
 mod light;
@@ -46,12 +51,15 @@ mod model;
 mod physics;
 mod resources;
 mod texture;
+mod voxel;
 
 const CHUNK_RENDER_DISTANCE: i32 = 12;
 pub const GRAVITY: f32 = 9.8;
 pub const ROTATE_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0., 0.0, 0.0, 0.0, 0.0, 1.0,
 );
+
+const ROTATION_SPEED: f32 = 2.0 * std::f32::consts::PI / 10.0;
 
 // We need this forRust to store our data correctly for the shaders
 #[repr(C)]
@@ -78,6 +86,71 @@ impl CameraUniform {
     }
 }
 
+struct Instance {
+    position: cgmath::Point3<f32>,
+    texture: u32,
+}
+
+impl Instance {
+    fn to_raw(&self) -> InstanceRaw {
+        InstanceRaw {
+            model: cgmath::Matrix4::from_translation(self.position.to_vec()).into(),
+            texture: self.texture,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct InstanceRaw {
+    model: [[f32; 4]; 4],
+    texture: u32,
+}
+
+impl InstanceRaw {
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        use std::mem;
+        wgpu::VertexBufferLayout {
+            array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
+            // We need to switch from using a step mode of Vertex to Instance
+            // This means that our shaders will only change to use the next
+            // instance when the shader starts processing a new instance
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &[
+                // A mat4 takes up 4 vertex slots as it is technically 4 vec4s. We need to define a slot
+                // for each vec4. We'll have to reassemble the mat4 in the shader.
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    // While our vertex shader only uses locations 0, and 1 now, in later tutorials, we'll
+                    // be using 2, 3, and 4, for Vertex. We'll start at slot 5, not conflict with them later
+                    shader_location: 5,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
+                    shader_location: 6,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
+                    shader_location: 7,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 12]>() as wgpu::BufferAddress,
+                    shader_location: 8,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 16]>() as wgpu::BufferAddress,
+                    shader_location: 9,
+                    format: wgpu::VertexFormat::Uint32,
+                },
+            ],
+        }
+    }
+}
+
 struct State {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -85,6 +158,7 @@ struct State {
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
     render_pipeline: wgpu::RenderPipeline,
+    entity_render_pipeline: wgpu::RenderPipeline,
     render_pipeline_layout: wgpu::PipelineLayout,
     bg_color: wgpu::Color,
     camera: Camera,
@@ -99,6 +173,8 @@ struct State {
     light_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
     diffuse_bind_group: wgpu::BindGroup,
+    instance_buffer: wgpu::Buffer,
+    cube_model: Model,
     // The window must be declared after the surface so
     // it gets dropped after it as the surface contains
     // unsafe references to the window's resources.
@@ -112,6 +188,7 @@ struct State {
     render_pipeline_dirty: bool,
     egui_renderer: EguiRenderer,
     fps_tracker: Fps,
+    drops: Vec<Drop>,
     ready: bool,
 }
 
@@ -312,6 +389,22 @@ impl State {
             )
         };
 
+        let entity_render_pipeline = {
+            let shader = wgpu::ShaderModuleDescriptor {
+                label: Some("Normal Shader2"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("../res/entity_shader.wgsl").into()),
+            };
+            create_render_pipeline(
+                &device,
+                &render_pipeline_layout,
+                config.format,
+                Some(texture::Texture::DEPTH_FORMAT),
+                &[model::ModelVertex::desc(), InstanceRaw::desc()],
+                shader,
+                &Wireframe::Off,
+            )
+        };
+
         let noise = Fbm::<Simplex>::new(0);
 
         let egui_renderer = EguiRenderer::new(
@@ -323,6 +416,24 @@ impl State {
         );
 
         let chunk_manager = ChunkManager::new();
+
+        // size the instance buffer to 1000 for now
+        let instance_data: Vec<InstanceRaw> = vec![
+            InstanceRaw {
+                model: cgmath::Matrix4::identity().into(),
+                texture: 0,
+            };
+            1000
+        ];
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: bytemuck::cast_slice(&instance_data),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let cube = load_block(&device, &queue).unwrap();
+
+        let drops = vec![];
 
         Self {
             window,
@@ -336,9 +447,11 @@ impl State {
             bg_color: wgpu::Color::BLACK,
             render_pipeline,
             render_pipeline_layout,
+            entity_render_pipeline,
             camera_uniform,
             camera_buffer,
             projection,
+            cube_model: cube,
             camera_bind_group,
             light_buffer,
             light_uniform,
@@ -347,6 +460,7 @@ impl State {
             camera,
             camera_controller,
             depth_texture,
+            drops,
             diffuse_bind_group,
             file_watcher,
             mouse_pressed: false,
@@ -356,6 +470,7 @@ impl State {
             render_pipeline_dirty: false,
             fps_tracker: Fps::new(120),
             ready: false,
+            instance_buffer,
         }
     }
 
@@ -457,6 +572,23 @@ impl State {
             dt,
         );
 
+        for drop in self.drops.iter_mut() {
+            // apply some visual rotation, we want blocks to rotate fully around the y axis every
+            // 10 seconds
+            let amount = cgmath::Quaternion::from_angle_y(cgmath::Rad(ROTATION_SPEED * dt.as_secs_f32()));
+            let current = drop.rotation;
+            drop.rotation = amount * current;
+
+            physics::update_body(
+                drop,
+                self.chunk_manager
+                    .loaded_chunks
+                    .values()
+                    .map(|chunk| &chunk.chunk),
+                dt,
+            );
+        }
+
         // reset _all_ blocks to inactive (this feels very inefficient...)
         for chunk in self.chunk_manager.loaded_chunks.values_mut() {
             for block in chunk.chunk.blocks.iter_mut() {
@@ -477,8 +609,18 @@ impl State {
                 raycast_result.block_mut().is_selected = true;
             }
             if self.mouse_pressed && !self.mouse_press_latched {
-                raycast_result.block_mut().is_active = false;
+                let block = raycast_result.block_mut();
+                block.is_active = false;
                 self.mouse_press_latched = true;
+                let mut drop = block.drop();
+                // randomize initial velocity a bit
+                drop.physics_state.velocity = cgmath::Vector3::new(
+                    rand::thread_rng().gen_range(-1.0..1.0),
+                    rand::thread_rng().gen_range(1.0..2.0),
+                    rand::thread_rng().gen_range(-1.0..1.0),
+                );
+
+                self.drops.push(drop);
             }
         }
 
@@ -492,6 +634,23 @@ impl State {
             &self.light_buffer,
             0,
             bytemuck::cast_slice(&[self.light_uniform]),
+        );
+
+        self.queue.write_buffer(
+            &self.instance_buffer,
+            0,
+            bytemuck::cast_slice(
+                &self
+                    .drops
+                    .iter()
+                    .map(|drop| {
+                        InstanceRaw {
+                            model: drop.quaternion().into(),
+                            texture: drop.block_type.into(),
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+            ),
         );
 
         // Force cursor back to middle
@@ -515,7 +674,6 @@ impl State {
             .values_mut()
             .filter(|chunk| chunk.chunk.dirty)
         {
-            info!("Updating chunk at {:?}", chunk.chunk.origin);
             let new_mesh = chunk.chunk.generate_mesh();
             chunk
                 .mesh_handle
@@ -525,7 +683,7 @@ impl State {
 
         // if shader has updated, recreate render Pipeline
         if let Some(path) = updated {
-            if path.ends_with("shader.wgsl") {
+            if path.ends_with("/shader.wgsl") {
                 // reload the shader
                 let shader_source = std::fs::read_to_string(path).unwrap();
                 let shader = wgpu::ShaderModuleDescriptor {
@@ -603,6 +761,16 @@ impl State {
                     &self.light_bind_group,
                 );
             }
+
+            render_pass.set_bind_group(2, &self.diffuse_bind_group, &[]);
+            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            render_pass.set_pipeline(&self.entity_render_pipeline);
+            render_pass.draw_model_instanced(
+                &self.cube_model,
+                0..self.drops.len() as u32,
+                &self.camera_bind_group,
+                &self.light_bind_group,
+            );
         }
 
         self.fps_tracker.update(Instant::now());

@@ -1,7 +1,7 @@
 use cgmath::{ElementWise, Vector3, Point3};
 use log::info;
 
-use crate::{aabb::Aabb};
+use crate::{aabb::Aabb, drops::Drop, physics::KinematicBodyState};
 
 pub const BLOCK_SIZE: f32 = 2.0;
 
@@ -44,6 +44,10 @@ impl Block {
             t: BlockType::Stone,
             origin
         }
+    }
+
+    pub fn drop(&self) -> Drop {
+        Drop::from_block(self.origin, self.t)
     }
 }
 

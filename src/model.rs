@@ -86,7 +86,6 @@ impl MeshHandle {
     pub fn update_mesh(&mut self, mesh: &Mesh, device: &wgpu::Device, queue: &wgpu::Queue) {
         // update vertex buffer
         self.num_elements = mesh.indices.len() as u32;
-        info!("Updating mesh with {} vertices and {} indices", mesh.vertices.len(), mesh.indices.len());
         if mesh.vertices.len() as u32 > self.vertex_buffer_length {
             info!("Resizing vertex buffer");
             self.vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

@@ -8,47 +8,41 @@ use crate::{model, texture};
 pub fn load_block(device: &wgpu::Device, queue: &wgpu::Queue) -> anyhow::Result<Model> {
     let vertices = [
         // Top
-        ModelVertex::new([1.0, 1.0, 1.0], [0.0, 1.0, 0.0]),
-        ModelVertex::new([1.0, 1.0, -1.0], [0.0, 1.0, 0.0]),
-        ModelVertex::new([-1.0, 1.0, -1.0], [0.0, 1.0, 0.0]),
-        ModelVertex::new([-1.0, 1.0, 1.0], [0.0, 1.0, 0.0]),
+        ModelVertex::new([1.0, 1.0, 1.0], [0.0, 1.0, 0.0], 0),
+        ModelVertex::new([1.0, 1.0, -1.0], [0.0, 1.0, 0.0], 0),
+        ModelVertex::new([-1.0, 1.0, -1.0], [0.0, 1.0, 0.0], 0),
+        ModelVertex::new([-1.0, 1.0, 1.0], [0.0, 1.0, 0.0], 0),
 
         // Bottom
-        ModelVertex::new([-1.0, -1.0, 1.0], [0.0, -1.0, 0.0]),
-        ModelVertex::new([-1.0, -1.0, -1.0], [0.0, -1.0, 0.0]),
-        ModelVertex::new([1.0, -1.0, -1.0], [0.0, -1.0, 0.0]),
-        ModelVertex::new([1.0, -1.0, 1.0], [0.0, -1.0, 0.0]),
+        ModelVertex::new([-1.0, -1.0, 1.0], [0.0, -1.0, 0.0], 0),
+        ModelVertex::new([-1.0, -1.0, -1.0], [0.0, -1.0, 0.0], 0),
+        ModelVertex::new([1.0, -1.0, -1.0], [0.0, -1.0, 0.0], 0),
+        ModelVertex::new([1.0, -1.0, 1.0], [0.0, -1.0, 0.0], 0),
         
         // Front
-        ModelVertex::new([1.0, 1.0, 1.0], [0.0, 0.0, 1.0]),
-        ModelVertex::new([-1.0, 1.0, 1.0], [0.0, 0.0, 1.0]),
-        ModelVertex::new([-1.0, -1.0, 1.0], [0.0, 0.0, 1.0]),
-        ModelVertex::new([1.0, -1.0, 1.0], [0.0, 0.0, 1.0]),
+        ModelVertex::new([1.0, 1.0, 1.0], [0.0, 0.0, 1.0], 0),
+        ModelVertex::new([-1.0, 1.0, 1.0], [0.0, 0.0, 1.0], 0),
+        ModelVertex::new([-1.0, -1.0, 1.0], [0.0, 0.0, 1.0], 0),
+        ModelVertex::new([1.0, -1.0, 1.0], [0.0, 0.0, 1.0], 0),
 
         // Back
-        ModelVertex::new([1.0, -1.0, -1.0], [0.0, 0.0, -1.0]),
-        ModelVertex::new([-1.0, -1.0, -1.0], [0.0, 0.0, -1.0]),
-        ModelVertex::new([-1.0, 1.0, -1.0], [0.0, 0.0, -1.0]),
-        ModelVertex::new([1.0, 1.0, -1.0], [0.0, 0.0, -1.0]),
+        ModelVertex::new([1.0, -1.0, -1.0], [0.0, 0.0, -1.0], 0),
+        ModelVertex::new([-1.0, -1.0, -1.0], [0.0, 0.0, -1.0], 0),
+        ModelVertex::new([-1.0, 1.0, -1.0], [0.0, 0.0, -1.0], 0),
+        ModelVertex::new([1.0, 1.0, -1.0], [0.0, 0.0, -1.0],0),
 
         // Left
-        ModelVertex::new([-1.0, 1.0, 1.0], [-1.0, 0.0, 0.0]),
-        ModelVertex::new([-1.0, 1.0, -1.0], [-1.0, 0.0, 0.0]),
-        ModelVertex::new([-1.0, -1.0, -1.0], [-1.0, 0.0, 0.0]),
-        ModelVertex::new([-1.0, -1.0, 1.0], [-1.0, 0.0, 0.0]),
+        ModelVertex::new([-1.0, 1.0, 1.0], [-1.0, 0.0, 0.0],0),
+        ModelVertex::new([-1.0, 1.0, -1.0], [-1.0, 0.0, 0.0], 0),
+        ModelVertex::new([-1.0, -1.0, -1.0], [-1.0, 0.0, 0.0], 0),
+        ModelVertex::new([-1.0, -1.0, 1.0], [-1.0, 0.0, 0.0], 0),
 
         // Right
-        ModelVertex::new([1.0, 1.0, -1.0], [1.0, 0.0, 0.0]),
-        ModelVertex::new([1.0, 1.0, 1.0], [1.0, 0.0, 0.0]),
-        ModelVertex::new([1.0, -1.0, 1.0], [1.0, 0.0, 0.0]),
-        ModelVertex::new([1.0, -1.0, -1.0], [1.0, 0.0, 0.0]),
+        ModelVertex::new([1.0, 1.0, -1.0], [1.0, 0.0, 0.0], 0),
+        ModelVertex::new([1.0, 1.0, 1.0], [1.0, 0.0, 0.0], 0),
+        ModelVertex::new([1.0, -1.0, 1.0], [1.0, 0.0, 0.0], 0),
+        ModelVertex::new([1.0, -1.0, -1.0], [1.0, 0.0, 0.0], 0),
     ];
-
-    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some(&format!("Vertex Buffer")),
-        contents: bytemuck::cast_slice(&vertices),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
 
     let indices = [
         // Top
@@ -66,21 +60,13 @@ pub fn load_block(device: &wgpu::Device, queue: &wgpu::Queue) -> anyhow::Result<
 
     ];
 
-    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some(&format!("Index Buffer")),
-        contents: bytemuck::cast_slice(&indices),
-        usage: wgpu::BufferUsages::INDEX,
-    });
-
     let obj = model::Mesh {
-        name: "block".to_string(),
-        vertex_buffer,
-        index_buffer,
-        num_elements: indices.len() as u32,
+        vertices: vertices.to_vec(),
+        indices: indices.to_vec(),
     };
 
     Ok(Model {
-        meshes: vec![obj],
+        meshes: vec![model::MeshHandle::from_mesh(device, &obj)],
         materials: vec![],
     })
 }
