@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use cgmath::num_traits::{Float, Signed};
+use cgmath::{
+    num_traits::{Float, Signed},
+    Vector3,
+};
 use log::info;
 
 use crate::{
@@ -171,11 +174,7 @@ pub fn update_body<'a>(
     let mut grounded_collider = collider;
     grounded_collider.min.y -= 0.05;
     if let Some(collision_vector) = collide_chunks(chunks, &grounded_collider) {
-        if collision_vector.y != 0.0 {
-            physics_state.grounded = true;
-        } else {
-            physics_state.grounded = false;
-        }
+        physics_state.grounded = collision_vector.y != 0.0;
     } else {
         physics_state.grounded = false;
     }
@@ -238,9 +237,34 @@ pub fn cast_ray_chunks_mut<'a>(
         })
 }
 
+pub fn block_collision_side(
+    origin: &cgmath::Point3<f32>,
+    direction: &cgmath::Vector3<f32>,
+    block: &Block,
+) -> Vector3<f32> {
+    let result = block
+        .aabb()
+        .intersect_ray(origin, direction)
+        .unwrap();
+
+    // given the collision distance, we can determine the side of the block that was hit?
+    let collision_point = origin + direction * result[0];
+
+    let origin = block.origin();
+    if (collision_point.x - origin.x).abs() > 0.99 {
+        Vector3::new(-direction.x.signum(), 0.0, 0.0)
+    } else if (collision_point.y - origin.y).abs() > 0.99 {
+        Vector3::new(0.0, -direction.y.signum(), 0.0)
+    } else {
+        Vector3::new(0.0, 0.0, -direction.z.signum())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use cgmath::AbsDiffEq;
+
+    use crate::block::BlockType;
 
     use super::*;
 
@@ -287,7 +311,7 @@ mod tests {
         let direction = cgmath::Vector3::new(1.0, 0.0, 0.0);
         let result = cast_ray_chunks_mut(&origin, &direction, chunks.iter_mut());
         assert_eq!(
-            result.unwrap().block().origin,
+            result.unwrap().block().origin(),
             cgmath::Point3::new(1.0, 1.0, 1.0)
         );
     }
@@ -322,8 +346,20 @@ mod tests {
         let result = cast_ray_chunks_mut(&origin, &look_direction, chunks.iter_mut());
         // looking straight up, no expected collision
         assert_eq!(
-            result.unwrap().block().origin,
+            result.unwrap().block().origin(),
             cgmath::Point3::new(9.0, -1.0, -17.0)
         );
+    }
+
+    #[test]
+    fn test_block_collision_side() {
+        let mut block = Block::new(cgmath::Point3::new(5, 0, 0));
+        block.is_active = true;
+
+
+        let origin = cgmath::Point3::new(0.0, 0.0, 0.0);
+        let direction = cgmath::Vector3::new(1.0, 0.0, 0.0);
+        let result = block_collision_side(&origin, &direction, &block);
+        assert_eq!(result, cgmath::Vector3::new(-1.0, 0.0, 0.0));
     }
 }

@@ -9,9 +9,9 @@ use std::{
 };
 
 use aabb::Aabb;
-use block::{BlockType, BLOCK_SIZE};
+use block::{Block, BlockType, BLOCK_SIZE};
 use camera::{Camera, CameraController, Projection};
-use cgmath::prelude::*;
+use cgmath::{prelude::*, Vector3};
 use chunk::{Chunk, ChunkWithMesh, CHUNK_SIZE};
 use chunk_manager::ChunkManager;
 use drops::Drop;
@@ -24,7 +24,7 @@ use log::{debug, info};
 use model::{DrawLight, DrawModel, MeshHandle, Model, ModelVertex};
 use noise::{Fbm, Simplex};
 use notify::{event::ModifyKind, RecommendedWatcher, RecursiveMode, Watcher};
-use physics::{KinematicBody, KinematicBodyState};
+use physics::{block_collision_side, KinematicBody, KinematicBodyState};
 use rand::Rng;
 use voxel::load_block;
 use wgpu::util::DeviceExt;
@@ -48,13 +48,13 @@ mod chunk_manager;
 mod drops;
 mod egui_renderer;
 mod fps;
+mod inventory;
 mod light;
 mod model;
 mod physics;
 mod resources;
 mod texture;
 mod voxel;
-mod inventory;
 
 const CHUNK_RENDER_DISTANCE: i32 = 12;
 pub const GRAVITY: f32 = 9.8;
@@ -186,6 +186,8 @@ struct State {
     file_watcher: FileWatcher,
     mouse_pressed: bool,
     mouse_press_latched: bool,
+    mouse_right_pressed: bool,
+    mouse_right_press_latched: bool,
     noise: Fbm<Simplex>,
     wireframe: Wireframe,
     render_pipeline_dirty: bool,
@@ -469,6 +471,8 @@ impl State {
             file_watcher,
             mouse_pressed: false,
             mouse_press_latched: false,
+            mouse_right_pressed: false,
+            mouse_right_press_latched: false,
             noise,
             wireframe,
             render_pipeline_dirty: false,
@@ -513,15 +517,57 @@ impl State {
                 ..
             } => {
                 if !(self.camera_controller.process_keyboard(*key, *state)) {
-                    if *state == ElementState::Pressed
-                        && *key == PhysicalKey::Code(KeyCode::KeyP)
-                        && repeat == &false
-                    {
-                        self.wireframe.toggle();
-                        self.render_pipeline_dirty = true;
-                        return true;
+                    match (*state, *key, *repeat) {
+                        (ElementState::Pressed, PhysicalKey::Code(KeyCode::KeyP), false) => {
+                            self.wireframe.toggle();
+                            self.render_pipeline_dirty = true;
+                            return true;
+                        }
+                        (ElementState::Pressed, PhysicalKey::Code(code), false) => {
+                            return match code {
+                                KeyCode::Digit1 => {
+                                    self.inventory.selected_index = 0;
+                                    true
+                                }
+                                KeyCode::Digit2 => {
+                                    self.inventory.selected_index = 1;
+                                    true
+                                }
+                                KeyCode::Digit3 => {
+                                    self.inventory.selected_index = 2;
+                                    true
+                                }
+                                KeyCode::Digit4 => {
+                                    self.inventory.selected_index = 3;
+                                    true
+                                }
+                                KeyCode::Digit5 => {
+                                    self.inventory.selected_index = 4;
+                                    true
+                                }
+                                KeyCode::Digit6 => {
+                                    self.inventory.selected_index = 5;
+                                    true
+                                }
+                                KeyCode::Digit7 => {
+                                    self.inventory.selected_index = 6;
+                                    true
+                                }
+                                KeyCode::Digit8 => {
+                                    self.inventory.selected_index = 7;
+                                    true
+                                }
+                                KeyCode::Digit9 => {
+                                    self.inventory.selected_index = 8;
+                                    true
+                                }
+                                _ => {
+                                    return false;
+                                }
+                            }
+                        }
+                        _ => return false,
                     }
-                    return false;
                 }
                 false
             }
@@ -533,6 +579,17 @@ impl State {
                 self.mouse_pressed = *state == ElementState::Pressed;
                 if *state == ElementState::Released {
                     self.mouse_press_latched = false;
+                }
+                true
+            }
+            WindowEvent::MouseInput {
+                button: MouseButton::Right,
+                state,
+                ..
+            } => {
+                self.mouse_right_pressed = *state == ElementState::Pressed;
+                if *state == ElementState::Released {
+                    self.mouse_right_press_latched = false;
                 }
                 true
             }
@@ -580,7 +637,8 @@ impl State {
         for drop in self.drops.iter_mut() {
             // apply some visual rotation, we want blocks to rotate fully around the y axis every
             // 10 seconds
-            let amount = cgmath::Quaternion::from_angle_y(cgmath::Rad(ROTATION_SPEED * dt.as_secs_f32()));
+            let amount =
+                cgmath::Quaternion::from_angle_y(cgmath::Rad(ROTATION_SPEED * dt.as_secs_f32()));
             let current = drop.rotation;
             drop.rotation = amount * current;
 
@@ -592,13 +650,12 @@ impl State {
                     .map(|chunk| &chunk.chunk),
                 dt,
             );
-
         }
 
         self.drops.retain(|drop| {
             if drop.aabb().intersects(&self.camera.collider()) {
                 self.inventory.add(drop.block_type);
-                return false
+                return false;
             }
             true
         });
@@ -609,8 +666,9 @@ impl State {
                 block.is_selected = false;
             }
         }
-        
+
         // check if player collides with any of the drops
+        let mut block_updates = vec![];
 
         // update active block based on camera position
         if let Some(mut raycast_result) = physics::cast_ray_chunks_mut(
@@ -637,8 +695,23 @@ impl State {
                 );
 
                 self.drops.push(drop);
+            } else if self.mouse_right_pressed && !self.mouse_right_press_latched {
+                // figure out what side is selected?
+                let side = block_collision_side(
+                    &self.camera.physics_state.position,
+                    &self.camera.look_direction(),
+                    raycast_result.block(),
+                );
+
+                self.mouse_right_press_latched = true;
+                let mut new_block = Block::new(raycast_result.block().coords + Vector3::from((side.x as i32, side.y as i32, side.z as i32)));
+                new_block.is_active = true;
+                new_block.t = self.inventory.items[self.inventory.selected_index].block_type;
+                block_updates.push(new_block);
             }
         }
+
+        self.chunk_manager.update_blocks(block_updates);
 
         // Update the light
         let old_position: cgmath::Vector3<_> = self.light_uniform.position.into();
@@ -659,11 +732,9 @@ impl State {
                 &self
                     .drops
                     .iter()
-                    .map(|drop| {
-                        InstanceRaw {
-                            model: drop.quaternion().into(),
-                            texture: drop.block_type.into(),
-                        }
+                    .map(|drop| InstanceRaw {
+                        model: drop.quaternion().into(),
+                        texture: drop.block_type.into(),
                     })
                     .collect::<Vec<_>>(),
             ),
@@ -829,8 +900,16 @@ impl State {
                     // Subsection for inventory
                     ui.separator();
                     ui.label("Inventory");
-                    for (block_type, count) in self.inventory.items.iter() {
-                        ui.label(format!("{:?}: {}", block_type, count));
+                    for (index, item) in self.inventory.items.iter().enumerate() {
+                        let active_text = if index == self.inventory.selected_index {
+                            " (active)"
+                        } else {
+                            ""
+                        };
+                        ui.label(format!(
+                            "{:?}: {} {}",
+                            item.block_type, item.count, active_text
+                        ));
                     }
                 });
             },

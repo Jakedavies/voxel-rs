@@ -45,22 +45,16 @@ impl Chunk16 {
             dirty: false,
             blocks: {
                 let mut blocks = Vec::with_capacity(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE);
-                let chunk_origin = cgmath::Point3::new(
-                    x as f32 * CHUNK_SIZE as f32 * BLOCK_SIZE,
-                    y as f32 * CHUNK_SIZE as f32 * BLOCK_SIZE,
-                    z as f32 * CHUNK_SIZE as f32 * BLOCK_SIZE,
+                let chunk_offset = cgmath::Point3::new(
+                    x * CHUNK_SIZE as i32,
+                    y * CHUNK_SIZE as i32,
+                    z * CHUNK_SIZE as i32,
                 );
 
                 for index in 0..CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE {
-                    blocks.push(Block::new(chunk_origin));
                     let (x_, y_, z_) = Self::index_to_xyz(index);
-                    let block_origin = chunk_origin
-                        + cgmath::Vector3::new(
-                            x_ as f32 * BLOCK_SIZE + BLOCK_SIZE / 2.0,
-                            y_ as f32 * BLOCK_SIZE + BLOCK_SIZE / 2.0,
-                            z_ as f32 * BLOCK_SIZE + BLOCK_SIZE / 2.0,
-                        );
-                    blocks[index] = Block::new(block_origin);
+                    let block_origin = chunk_offset + cgmath::Vector3::new(x_ as i32, y_ as i32, z_ as i32);
+                    blocks.push(Block::new(block_origin));
                 }
                 blocks[..CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE]
                     .try_into()
@@ -237,6 +231,12 @@ impl Chunk16 {
         let y = (index / CHUNK_SIZE) % CHUNK_SIZE;
         let z = index / CHUNK_SIZE / CHUNK_SIZE;
         (x as u8, y as u8, z as u8)
+    }
+
+    pub fn set_block(&mut self, x: u8, y: u8, z: u8, block: Block) {
+        let index = Self::xyz_to_index(x, y, z);
+        info!("Setting block at index {}", index);
+        self.blocks[index] = block;
     }
 
     /*
