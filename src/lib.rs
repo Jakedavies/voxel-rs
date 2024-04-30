@@ -707,6 +707,7 @@ impl State {
                 let mut new_block = Block::new(raycast_result.block().coords + Vector3::from((side.x as i32, side.y as i32, side.z as i32)));
                 new_block.is_active = true;
                 new_block.t = self.inventory.items[self.inventory.selected_index].block_type;
+                self.inventory.remove(new_block.t);
                 block_updates.push(new_block);
             }
         }
