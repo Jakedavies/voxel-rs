@@ -353,11 +353,10 @@ mod tests {
 
     #[test]
     fn test_block_collision_side() {
-        let mut block = Block::new(cgmath::Point3::new(5, 0, 0));
+        let mut block = Block::new(cgmath::Point3::new(4, 0, 0));
         block.is_active = true;
 
-
-        let origin = cgmath::Point3::new(0.0, 0.0, 0.0);
+        let origin = cgmath::Point3::new(0.0, 1.0, 1.0);
         let direction = cgmath::Vector3::new(1.0, 0.0, 0.0);
         let result = block_collision_side(&origin, &direction, &block);
         assert_eq!(result, cgmath::Vector3::new(-1.0, 0.0, 0.0));

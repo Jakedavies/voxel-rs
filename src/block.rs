@@ -72,38 +72,39 @@ impl Aabb for Block {
 
 #[cfg(test)]
 mod tests {
+    use cgmath::assert_ulps_eq;
     use super::*;
 
     #[test]
     fn test_block_min_max() {
         let block = Block::new(Point3::new(0, 0, 0));
-        assert_eq!(block.min(), Point3::new(-1.0, -1.0, -1.0));
-        assert_eq!(block.max(), Point3::new(1.0, 1.0, 1.0));
+        assert_eq!(block.min(), Point3::new(0.0, 0.0, 0.0));
+        assert_eq!(block.max(), Point3::new(2.0, 2.0, 2.0));
     }
 
     #[test]
     fn test_block_min_max_2() {
         let block = Block::new(Point3::new(16, 16, 16));
-        assert_eq!(block.min(), Point3::new(15.0, 15.0, 15.0));
-        assert_eq!(block.max(), Point3::new(17.0, 17.0, 17.0));
+        assert_eq!(block.min(), Point3::new(32.0, 32.0, 32.0));
+        assert_eq!(block.max(), Point3::new(34.0, 34.0, 34.0));
     }
 
     #[test]
     fn test_block_coords() {
         let block = Block::new(Point3::new(1, 1, 1));
-        assert_eq!(block.coords, (1, 1, 1).into());
+        assert_ulps_eq!(block.origin(), Point3::new(3.0, 3.0, 3.0));
     }
 
     #[test]
     fn test_block_coords_2() {
         let block = Block::new(Point3::new(3, 1, 1));
-        assert_eq!(block.coords, (1, 0, 0).into());
+        assert_ulps_eq!(block.origin(), Point3::new(7.0, 3.0, 3.0));
     }
 
     #[test]
     fn test_block_coords_3() {
         let block = Block::new(Point3::new(3, -1, 1));
-        assert_eq!(block.coords, (1, -1, 0).into());
+        assert_ulps_eq!(block.origin(), Point3::new(7.0, -1.0, 3.0));
     }
 
 }
