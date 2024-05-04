@@ -5,7 +5,6 @@ use std::{
     path::Path,
     sync::{Arc, Mutex},
     thread,
-    time::Instant,
 };
 
 use aabb::Aabb;
@@ -18,6 +17,7 @@ use drops::Drop;
 use egui_renderer::EguiRenderer;
 use egui_wgpu::ScreenDescriptor;
 use fps::Fps;
+use instant::Instant;
 use inventory::Inventory;
 use light::LightUniform;
 use log::{debug, info};
@@ -35,10 +35,13 @@ use winit::{
     event_loop::EventLoop,
     keyboard::{Key, KeyCode, PhysicalKey},
     window::Window,
-    window::WindowBuilder,
+    window::{CursorGrabMode, WindowBuilder},
 };
 
-use crate::{chunk::Chunk16, model::Vertex, resources::load_texture};
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+use crate::{chunk::Chunk16, model::Vertex};
 
 mod aabb;
 mod block;
@@ -183,7 +186,6 @@ struct State {
     // unsafe references to the window's resources.
     window: Window,
     chunk_manager: ChunkManager,
-    file_watcher: FileWatcher,
     mouse_pressed: bool,
     mouse_press_latched: bool,
     mouse_right_pressed: bool,
@@ -231,8 +233,14 @@ impl Iterator for FileWatcher {
 
 impl State {
     // Creating some of the wgpu types requires async code
-    async fn new(window: Window, file_watcher: FileWatcher) -> Self {
-        let size = window.inner_size();
+    async fn new(window: Window) -> Self {
+        let mut size = window.inner_size();
+        if size.width == 0 {
+            size.width = 720;
+        }
+        if size.height == 0 {
+            size.height = 480;
+        }
 
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
@@ -265,7 +273,7 @@ impl State {
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    required_features: wgpu::Features::POLYGON_MODE_LINE,
+                    required_features: wgpu::Features::empty(),
                     // WebGL doesn't support all of wgpu's features, so if
                     // we're building for the web, we'll have to disable some.
                     required_limits: if cfg!(target_arch = "wasm32") {
@@ -468,7 +476,6 @@ impl State {
             depth_texture,
             drops,
             diffuse_bind_group,
-            file_watcher,
             mouse_pressed: false,
             mouse_press_latched: false,
             mouse_right_pressed: false,
@@ -490,6 +497,10 @@ impl State {
     // impl State
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
+            let new_size = winit::dpi::PhysicalSize {
+                width: new_size.width.min(2048),
+                height: new_size.height.min(2048),
+            };
             self.size = new_size;
             self.config.width = new_size.width;
             self.config.height = new_size.height;
@@ -704,9 +715,15 @@ impl State {
                 );
 
                 self.mouse_right_press_latched = true;
-                let mut new_block = Block::new(raycast_result.block().coords + Vector3::from((side.x as i32, side.y as i32, side.z as i32)));
+                let mut new_block = Block::new(
+                    raycast_result.block().coords
+                        + Vector3::from((side.x as i32, side.y as i32, side.z as i32)),
+                );
                 new_block.is_active = true;
-                new_block.t = self.inventory.items[self.inventory.selected_index].block_type;
+                new_block.t = self.inventory.items
+                    .get(self.inventory.selected_index)
+                    .map(|item| item.block_type)
+                    .unwrap_or(BlockType::Dirt);
                 self.inventory.remove(new_block.t);
                 block_updates.push(new_block);
             }
@@ -743,18 +760,19 @@ impl State {
 
         // Force cursor back to middle
         if self.window.has_focus() {
-            self.window
+            let _ = self.window
                 .set_cursor_position(winit::dpi::PhysicalPosition::new(
                     self.size.width as f64 / 2.0,
                     self.size.height as f64 / 2.0,
-                ))
-                .unwrap();
+                )).or_else(|e| {
+                    debug!("Failed to set cursor position: {:?}", e);
+                    self.window.set_cursor_grab(CursorGrabMode::Locked)
+                });
         }
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
-        let updated = self.file_watcher.clone().next();
 
         for chunk in self
             .chunk_manager
@@ -768,43 +786,6 @@ impl State {
                 .update_mesh(&new_mesh, &self.device, &self.queue);
             chunk.chunk.dirty = false;
         }
-
-        // if shader has updated, recreate render Pipeline
-        if let Some(path) = updated {
-            if path.ends_with("/shader.wgsl") {
-                // reload the shader
-                let shader_source = std::fs::read_to_string(path).unwrap();
-                let shader = wgpu::ShaderModuleDescriptor {
-                    label: Some("Normal Shader"),
-                    source: wgpu::ShaderSource::Wgsl(shader_source.into()),
-                };
-                self.render_pipeline = create_render_pipeline(
-                    &self.device,
-                    &self.render_pipeline_layout,
-                    self.config.format,
-                    Some(texture::Texture::DEPTH_FORMAT),
-                    &[model::ModelVertex::desc()],
-                    shader,
-                    &self.wireframe,
-                );
-            }
-        }
-
-        if self.render_pipeline_dirty {
-            self.render_pipeline = create_render_pipeline(
-                &self.device,
-                &self.render_pipeline_layout,
-                self.config.format,
-                Some(texture::Texture::DEPTH_FORMAT),
-                &[model::ModelVertex::desc()],
-                wgpu::ShaderModuleDescriptor {
-                    label: Some("Normal Shader"),
-                    source: wgpu::ShaderSource::Wgsl(include_str!("../res/shader.wgsl").into()),
-                },
-                &self.wireframe,
-            );
-        }
-        self.render_pipeline_dirty = false;
 
         let view = output
             .texture
@@ -998,35 +979,41 @@ fn create_render_pipeline(
     })
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
 pub async fn run() {
+    cfg_if::cfg_if! {
+        if #[cfg(target_arch = "wasm32")] {
+            std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+            console_log::init_with_level(log::Level::Warn).expect("Couldn't initialize logger");
+        } else {
+            env_logger::init();
+        }
+    }
+
     let event_loop = EventLoop::new().unwrap();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    let file_watcher = FileWatcher::default();
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Winit prevents sizing with CSS, so we have to set
+        // the size manually when on web.
+        use winit::dpi::PhysicalSize;
+        let _ = window.request_inner_size(PhysicalSize::new(450, 400));
 
-    // setup file watching
-    let f = file_watcher.clone();
-    let mut watcher = RecommendedWatcher::new(
-        move |result: Result<notify::Event, notify::Error>| {
-            let event = result.unwrap();
-            match event.kind {
-                notify::EventKind::Modify(ModifyKind::Data(_)) => {
-                    for path in event.paths {
-                        f.write(path.to_str().unwrap());
-                    }
-                }
-                _ => {}
-            }
-        },
-        notify::Config::default(),
-    )
-    .unwrap();
+        use winit::platform::web::WindowExtWebSys;
+        web_sys::window()
+            .and_then(|win| win.document())
+            .and_then(|doc| {
+                let dst = doc.get_element_by_id("wasm-example")?;
+                let canvas = web_sys::Element::from(window.canvas()?);
+                dst.append_child(&canvas).ok()?;
+                Some(())
+            })
+            .expect("Couldn't append canvas to document body.");
+    }
 
-    watcher
-        .watch(Path::new("res/"), RecursiveMode::Recursive)
-        .unwrap();
 
-    let mut state = State::new(window, file_watcher).await;
+    let mut state = State::new(window).await;
     let mut last_render_time = None;
 
     event_loop
@@ -1068,4 +1055,5 @@ pub async fn run() {
             _ => {}
         })
         .unwrap();
-}
+
+   }

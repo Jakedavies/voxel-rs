@@ -2,7 +2,7 @@ use anyhow::*;
 use image::GenericImageView;
 use wgpu::{Device, BindGroupLayout, BindGroup};
 
-use crate::resources::load_texture;
+use crate::resources::{load_texture_from_bytes};
 
 pub struct Texture {
     pub texture: wgpu::Texture,
@@ -155,7 +155,8 @@ pub async fn setup(device: &Device, queue: &wgpu::Queue) -> (BindGroupLayout, Bi
             label: Some("texture_bind_group_layout"),
         });
 
-    let texture = load_texture("../res/terrain.png", &device, &queue)
+    let diffuse_bytes = include_bytes!("../res/terrain.png");
+    let texture = load_texture_from_bytes("terrain.png", diffuse_bytes, device, queue)
         .await
         .expect("Could not load texture");
 

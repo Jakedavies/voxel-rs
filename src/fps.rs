@@ -1,4 +1,6 @@
-use std::{collections::VecDeque, time::{Duration, Instant}};
+use std::{collections::VecDeque, time::Duration};
+
+use instant::Instant;
 
 pub struct Fps {
     last_time: Option<Instant>,
